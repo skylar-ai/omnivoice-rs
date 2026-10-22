@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-omnivoice-infer = { path = "../omnivoice-infer" }
+omnivoice-infer = { path = "../omnivoice-infer", version = "0.1.0-skylar-1" }
 axum = { version = "0.8.8", features = ["multipart"] }
 base64 = "0.22.1"
 clap = { version = "4.6.0", features = ["derive", "env"] }

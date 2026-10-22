@@ -1,6 +1,10 @@
 [package]
 name = "omnivoice-infer"
-version.workspace = true
+# skylar-ai fork on crates.io candle, published to skylar-crates only
+version = "0.1.0-skylar-1"
+description = "OmniVoice text-to-speech inference on candle (skylar-ai fork of FerrisMind/omnivoice-rs)"
+repository = "https://github.com/skylar-ai/omnivoice-rs"
+publish = ["skylar-crates"]
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

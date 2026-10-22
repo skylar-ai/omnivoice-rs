@@ -7,7 +7,7 @@ authors.workspace = true
 default-run = "omnivoice-cli"
 
 [dependencies]
-omnivoice-infer = { path = "../omnivoice-infer" }
+omnivoice-infer = { path = "../omnivoice-infer", version = "0.1.0-skylar-1" }
 serde_json.workspace = true
 candle-core.workspace = true
 hf-hub.workspace = true

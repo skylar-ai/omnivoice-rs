@@ -3,3 +3,7 @@
 # native = AVX2+FMA on this Ryzen 3700X. Frame pointers help Windows sampling profilers.
 [build]
 rustflags = ["-C", "target-cpu=native", "-C", "force-frame-pointers=yes"]
+
+# Private registry for Skylar crates
+[registries.skylar-crates]
+index = "sparse+https://skylar-crates-fica22pegq-uc.a.run.app/api/v1/crates/"
