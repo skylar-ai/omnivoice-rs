@@ -34,16 +34,10 @@ fn auto_device_resolution_order_is_gpu_first() {
     );
     #[cfg(feature = "cuda")]
     assert!(order.contains(&DeviceSpec::Cuda(0)));
-    #[cfg(feature = "vulkan")]
-    assert!(order.contains(&DeviceSpec::Vulkan(0)));
-    #[cfg(feature = "wgpu")]
-    assert!(order.contains(&DeviceSpec::Wgpu(0)));
     #[cfg(all(feature = "metal", target_os = "macos"))]
     assert!(order.contains(&DeviceSpec::Metal));
     #[cfg(all(
         not(feature = "cuda"),
-        not(feature = "vulkan"),
-        not(feature = "wgpu"),
         not(all(feature = "metal", target_os = "macos"))
     ))]
     assert_eq!(order, vec![DeviceSpec::Cpu]);
