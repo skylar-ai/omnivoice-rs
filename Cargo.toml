@@ -13,12 +13,12 @@ license = "Apache-2.0"
 authors = ["FerrisMind"]
 
 [workspace.dependencies]
-# FerrisMind candle fork (Vulkan + WGPU), pinned to the latest commit of
-# branch wgpu/vulkan: https://github.com/FerrisMind/candle (addb4aae)
-candle-core = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0" }
-candle-nn = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0" }
-candle-transformers = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0" }
-candle-flash-attn = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.11.0" }
+# candle 0.11.0 from crates.io (skylar-ai fork: Vulkan and WGPU backends removed so
+# omnivoice-infer can be published to a registry; see skylar-ai/skylar-tts-rs)
+candle-core = "0.11.0"
+candle-nn = "0.11.0"
+candle-transformers = "0.11.0"
+candle-flash-attn = "0.11.0"
 fslock = "0.2.1"
 half = "2.4.1"
 hound = "3.5.1"
@@ -30,7 +30,7 @@ serde_json = "1.0"
 strsim = "0.11.1"
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 thiserror = "2.0"
-tokenizers = "0.23.2"
+tokenizers = "0.22.2" # matches candle-core 0.11.0, which implements TokenizerFromGguf for 0.22
 mistralrs-audio = "0.8.1"
 unicode-general-category = "1.1.0"
 rand = "0.9.2"

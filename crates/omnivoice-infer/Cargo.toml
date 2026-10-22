@@ -27,15 +27,13 @@ mistralrs-audio = { workspace = true, optional = true }
 unicode-general-category.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-candle-core = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0", features = ["metal"] }
-candle-nn = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0", features = ["metal"] }
-candle-transformers = { git = "https://github.com/FerrisMind/candle", rev = "addb4aaeaf9fa4ecd642cbfdde1a4863471c2254", version = "0.1.0", features = ["metal"] }
+candle-core = { workspace = true, features = ["metal"] }
+candle-nn = { workspace = true, features = ["metal"] }
+candle-transformers = { workspace = true, features = ["metal"] }
 
 [features]
 default = []
 audio-helper = ["dep:mistralrs-audio"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:candle-flash-attn"]
 metal = []
-vulkan = ["candle-core/vulkan", "candle-nn/vulkan", "candle-transformers/vulkan"]
-wgpu = ["candle-core/wgpu", "candle-nn/wgpu", "candle-transformers/wgpu"]
 phase6-tests = []

@@ -2016,10 +2016,6 @@ fn resolve_batch_devices(
             let cuda_devices = detect_cuda_devices();
             if !cuda_devices.is_empty() {
                 cuda_devices
-            } else if detect_vulkan_device_available() {
-                vec![DeviceSpec::Vulkan(0)]
-            } else if detect_wgpu_device_available() {
-                vec![DeviceSpec::Wgpu(0)]
             } else if detect_metal_device_available() {
                 vec![DeviceSpec::Metal]
             } else {
@@ -2063,10 +2059,6 @@ fn describe_runtime_device(device: &Device) -> String {
         candle_core::DeviceLocation::Cpu => format!("{:?}", DeviceSpec::Cpu),
         candle_core::DeviceLocation::Cuda { gpu_id } => format!("{:?}", DeviceSpec::Cuda(gpu_id)),
         candle_core::DeviceLocation::Metal { gpu_id: _ } => format!("{:?}", DeviceSpec::Metal),
-        candle_core::DeviceLocation::Vulkan { gpu_id } => {
-            format!("{:?}", DeviceSpec::Vulkan(gpu_id))
-        }
-        candle_core::DeviceLocation::Wgpu { gpu_id } => format!("{:?}", DeviceSpec::Wgpu(gpu_id)),
     }
 }
 
@@ -2076,28 +2068,6 @@ fn detect_metal_device_available() -> bool {
         Device::new_metal(0).is_ok()
     }
     #[cfg(not(all(feature = "metal", target_os = "macos")))]
-    {
-        false
-    }
-}
-
-fn detect_vulkan_device_available() -> bool {
-    #[cfg(feature = "vulkan")]
-    {
-        Device::new_vulkan(0).is_ok()
-    }
-    #[cfg(not(feature = "vulkan"))]
-    {
-        false
-    }
-}
-
-fn detect_wgpu_device_available() -> bool {
-    #[cfg(feature = "wgpu")]
-    {
-        Device::new_wgpu(0).is_ok()
-    }
-    #[cfg(not(feature = "wgpu"))]
     {
         false
     }
@@ -2455,7 +2425,7 @@ fn parse_bool_arg(args: &[String], index: usize, name: &str) -> Result<bool, Omn
 }
 
 fn device_usage_values() -> &'static str {
-    "auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu"
+    "auto|cuda|cuda:N|mps|metal|cpu"
 }
 
 fn artifacts_validate_usage(program: &str) -> String {
@@ -2545,13 +2515,13 @@ fn usage() -> String {
     [
         "usage:",
         "  omnivoice-cli artifacts validate [--model <path-or-hf-repo>] [--reference-root <path>]",
-        "  omnivoice-cli infer [--model <path-or-hf-repo>] --text <text> --output <wav> [--language <lang>] [--ref-audio <wav>] [--ref-text <text>] [--instruct <text>] [--duration <seconds>] [--speed <factor>] [--asr-model <path-or-hf-repo>] [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32] [--seed <u64>] [--warmup <n>] [--repeat <n>] [--bench-json <path>]",
-        "  omnivoice-cli infer-batch [--model <path-or-hf-repo>] --test-list <jsonl> --res-dir <dir> [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32] [--batch-size <n>] [--batch-duration <seconds>] [--nj-per-gpu <n>] [--warmup <n>]",
-        "  omnivoice-cli prepare-prompt [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
-        "  omnivoice-cli stage1-prepare [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
-        "  omnivoice-cli stage1-decode [--model <path-or-hf-repo>] --reference-root <path> --case <id> --out <wav> [--raw] [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
-        "  omnivoice-cli stage0-generate [--model <path-or-hf-repo>] --reference-root <path> --case <id> --out <json> [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
-        "  omnivoice-cli stage0-debug [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|vulkan|vulkan:N|wgpu|wgpu:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
+        "  omnivoice-cli infer [--model <path-or-hf-repo>] --text <text> --output <wav> [--language <lang>] [--ref-audio <wav>] [--ref-text <text>] [--instruct <text>] [--duration <seconds>] [--speed <factor>] [--asr-model <path-or-hf-repo>] [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32] [--seed <u64>] [--warmup <n>] [--repeat <n>] [--bench-json <path>]",
+        "  omnivoice-cli infer-batch [--model <path-or-hf-repo>] --test-list <jsonl> --res-dir <dir> [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32] [--batch-size <n>] [--batch-duration <seconds>] [--nj-per-gpu <n>] [--warmup <n>]",
+        "  omnivoice-cli prepare-prompt [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
+        "  omnivoice-cli stage1-prepare [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
+        "  omnivoice-cli stage1-decode [--model <path-or-hf-repo>] --reference-root <path> --case <id> --out <wav> [--raw] [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
+        "  omnivoice-cli stage0-generate [--model <path-or-hf-repo>] --reference-root <path> --case <id> --out <json> [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
+        "  omnivoice-cli stage0-debug [--model <path-or-hf-repo>] --reference-root <path> --case <id> [--device auto|cuda|cuda:N|mps|metal|cpu] [--dtype auto|f16|bf16|f32]",
     ]
         .join("\n")
 }
