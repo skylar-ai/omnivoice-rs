@@ -1,0 +1,79 @@
+{
+    "lsp":
+    {
+        "rust-analyzer":
+        {
+            "initialization_options":
+            {
+                "inlayHints":
+                {
+                    "maxLength": null,
+                    "typeHints":
+                    {
+                        "enable": true,
+                        "hideNamedConstructor": false,
+                        "hideClosureInitialization": false
+                    },
+                    "parameterHints":
+                    {
+                        "enable": true
+                    },
+                    "chainingHints":
+                    {
+                        "enable": false
+                    },
+                    "closingBraceHints":
+                    {
+                        "enable": true,
+                        "minLines": 25
+                    },
+                    "closureReturnTypeHints":
+                    {
+                        "enable": "with_block"
+                    },
+                    "lifetimeElisionHints":
+                    {
+                        "enable": "skip_trivial",
+                        "useParameterNames": true
+                    },
+                    "bindingModeHints":
+                    {
+                        "enable": true
+                    }
+                },
+                "cargo":
+                {
+                    "features":
+                    [
+                        "whisper"
+                    ],
+                    "buildScripts":
+                    {
+                        "overrideCommand":
+                        [
+                            "cargo",
+                            "check",
+                            "--quiet",
+                            "--package",
+                            "ct2rs",
+                            "--features",
+                            "whisper",
+                            "--message-format=json",
+                            "--all-targets",
+                            "--keep-going"
+                        ]
+                    }
+                },
+                "check":
+                {
+                    "workspace": false,
+                    "extraArgs":
+                    [
+                        "--package",
+                        "ct2rs"
+                    ]
+                }
+            }
+        }
+    }
+}

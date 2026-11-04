@@ -1,8 +1,4 @@
-# Candle Q4_K vec_dot is compile-time gated on AVX2/NEON (`#[cfg(target_feature = "avx2")]`).
-# Default rustc x86-64 has no AVX, so GGUF CPU falls back to scalar kernels.
-# native = AVX2+FMA on this Ryzen 3700X. Frame pointers help Windows sampling profilers.
-[build]
-rustflags = ["-C", "target-cpu=native", "-C", "force-frame-pointers=yes"]
+# NOTE: rustflags (target-cpu=native, ...) live in pixi.toml [activation.env] (RUSTFLAGS).
 
 # Private registry for Skylar crates
 [registries.skylar-crates]

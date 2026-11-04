@@ -1,0 +1,86 @@
+[workspace]
+channels = ["conda-forge"] # https://prefix.dev/conda-forge
+name = "omnivoice-rs"
+platforms = [
+    { platform = "linux-64", cuda = "12.9" },
+]
+version = "0.1.0"
+
+# --- CPU (default environment) -------------------------------------------------
+[tasks]
+clean = "cargo clean"
+check = "cargo check --workspace"
+build = "cargo build --workspace"
+build-release = "cargo build --release --workspace"
+test = "cargo test --workspace"
+
+# --- CUDA (candle `cuda` feature, includes candle-flash-attn) -----------------
+# Override CUDA_COMPUTE_CAP (e.g. "89") to avoid relying on nvidia-smi autodetection,
+# which is unavailable on machines without a GPU (CI, build hosts).
+[tasks.check-cuda]
+cmd = "cargo check --workspace --features cuda"
+default-environment = "cuda"
+env = { CARGO_TARGET_DIR = "target/cuda" }
+
+[tasks.build-cuda]
+cmd = "cargo build --release -p omnivoice-cli -p omnivoice-server --features cuda"
+default-environment = "cuda"
+env = { CARGO_TARGET_DIR = "target/cuda" }
+
+[tasks.test-cuda]
+cmd = "cargo test -p omnivoice-infer --features cuda"
+default-environment = "cuda"
+env = { CARGO_TARGET_DIR = "target/cuda" }
+
+[tasks.publish]
+cmd = "cargo publish --allow-dirty --registry skylar-crates -p omnivoice-infer"
+default-environment = "default"
+
+# Candle's Q4_K (and other k-quant) AVX2 kernels are compile-time gated on
+# `#[cfg(target_feature = "avx2")]`; default rustc x86-64 has no AVX, so GGUF CPU inference
+# would fall back to scalar kernels. `native` enables AVX2/FMA(/AVX-512) of the build host,
+# so binaries are NOT portable to older CPUs (use `-C target-cpu=x86-64-v3` for that).
+# Frame pointers help sampling profilers (perf, etc.).
+# NOTE: RUSTFLAGS overrides any `build.rustflags` in .cargo/config.toml.
+[activation]
+# Keeps `pixi run` inside an already-activated shell (direnv) from doubling the compiler
+# flags (CFLAGS/CXXFLAGS/NVCC_PREPEND_FLAGS), which makes cargo rerun C/C++/CUDA build scripts.
+scripts = ["scripts/undo-reactivation.sh"]
+
+[activation.env]
+RUSTFLAGS = "-C target-cpu=native -C force-frame-pointers=yes"
+
+[dependencies]
+rust = "*"
+# `hf-hub` (native-tls) links against OpenSSL
+openssl = ">=3.6.4,<4"
+pkg-config = ">=0.29.2,<0.30"
+
+[environments]
+default = []
+cuda = ["cuda"]
+lint = ["lint"]
+
+[feature.cuda.dependencies]
+# C/C++ toolchain used by nvcc as host compiler (needed to build candle-kernels / flash-attn)
+compilers = ">=1.8.0"
+cuda-version = "12.9.*"
+cuda-nvcc = "*"
+cuda-cudart-dev = "*"
+cuda-nvrtc-dev = "*"
+libcublas-dev = "*"
+libcurand-dev = "*"
+git = "*" # candle-flash-attn fetches cutlass at build time
+
+[feature.cuda.activation.env]
+CUDA_TOOLKIT_ROOT_DIR = "$CONDA_PREFIX/targets/x86_64-linux"
+CUDA_PATH = "$CONDA_PREFIX/targets/x86_64-linux"
+CUDA_ROOT = "$CONDA_PREFIX/targets/x86_64-linux"
+PATH = "$CONDA_PREFIX/nvvm/bin:$PATH"
+
+[feature.lint.dependencies]
+dprint = "*"
+pre-commit = "*"
+
+[feature.lint.tasks]
+lint = "pre-commit run --all-files"
