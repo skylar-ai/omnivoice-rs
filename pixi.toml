@@ -15,22 +15,29 @@ build-release = "cargo build --release --workspace"
 test = "cargo test --workspace"
 
 # --- CUDA (candle `cuda` feature, includes candle-flash-attn) -----------------
-# Override CUDA_COMPUTE_CAP (e.g. "89") to avoid relying on nvidia-smi autodetection,
-# which is unavailable on machines without a GPU (CI, build hosts).
+# candle-flash-attn panics if CANDLE_FLASH_ATTN_BUILD_DIR does not exist; the CUDA tasks
+# depend on this (.envrc also creates it, for rust-analyzer and plain `cargo`).
+[tasks.cache-dir]
+cmd = "mkdir -p $CANDLE_FLASH_ATTN_BUILD_DIR"
+default-environment = "cuda"
+
 [tasks.check-cuda]
 cmd = "cargo check --workspace --features cuda"
 default-environment = "cuda"
 env = { CARGO_TARGET_DIR = "target/cuda" }
+depends-on = ["cache-dir"]
 
 [tasks.build-cuda]
 cmd = "cargo build --release -p omnivoice-cli -p omnivoice-server --features cuda"
 default-environment = "cuda"
 env = { CARGO_TARGET_DIR = "target/cuda" }
+depends-on = ["cache-dir"]
 
 [tasks.test-cuda]
 cmd = "cargo test -p omnivoice-infer --features cuda"
 default-environment = "cuda"
 env = { CARGO_TARGET_DIR = "target/cuda" }
+depends-on = ["cache-dir"]
 
 [tasks.publish]
 cmd = "cargo publish --allow-dirty --registry skylar-crates -p omnivoice-infer"
@@ -51,7 +58,10 @@ scripts = ["scripts/undo-reactivation.sh"]
 RUSTFLAGS = "-C target-cpu=native -C force-frame-pointers=yes"
 
 [dependencies]
+# Rust compiler toolchain
 rust = "*"
+rust-src = ">=1.98.1,<2"
+
 # `hf-hub` (native-tls) links against OpenSSL
 openssl = ">=3.6.4,<4"
 pkg-config = ">=0.29.2,<0.30"
@@ -73,6 +83,16 @@ libcurand-dev = "*"
 git = "*" # candle-flash-attn fetches cutlass at build time
 
 [feature.cuda.activation.env]
+# GPU architecture candle's CUDA and flash-attention kernels compile for (89 = NVIDIA L4).
+# Pinned so builds don't depend on nvidia-smi autodetection (absent on GPU-less hosts).
+CUDA_COMPUTE_CAP = "89"
+# Where candle-flash-attn compiles and reuses its kernels (~minutes per build otherwise);
+# shared with skylar-tts-rs, which uses the same candle-flash-attn version.
+CANDLE_FLASH_ATTN_BUILD_DIR = "$HOME/.cache/candle-flash-attn"
+# Parallel nvcc jobs cudaforge (candle's kernel builder) runs while compiling the kernels
+CUDAFORGE_THREADS = "16"
+# cudaforge/cudarc read CUDA_HOME before CUDA_PATH: override a system toolkit's CUDA_HOME
+CUDA_HOME = "$CONDA_PREFIX/targets/x86_64-linux"
 CUDA_TOOLKIT_ROOT_DIR = "$CONDA_PREFIX/targets/x86_64-linux"
 CUDA_PATH = "$CONDA_PREFIX/targets/x86_64-linux"
 CUDA_ROOT = "$CONDA_PREFIX/targets/x86_64-linux"

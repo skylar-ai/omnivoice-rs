@@ -43,35 +43,8 @@
                 },
                 "cargo":
                 {
-                    "features":
-                    [
-                        "whisper"
-                    ],
-                    "buildScripts":
-                    {
-                        "overrideCommand":
-                        [
-                            "cargo",
-                            "check",
-                            "--quiet",
-                            "--package",
-                            "ct2rs",
-                            "--features",
-                            "whisper",
-                            "--message-format=json",
-                            "--all-targets",
-                            "--keep-going"
-                        ]
-                    }
-                },
-                "check":
-                {
-                    "workspace": false,
-                    "extraArgs":
-                    [
-                        "--package",
-                        "ct2rs"
-                    ]
+                    "features": "all",
+                    "targetDir": true
                 }
             }
         }
