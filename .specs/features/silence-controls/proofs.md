@@ -1,6 +1,6 @@
 # silence-controls proofs
 
-**HEAD**: f4826c1
+**HEAD**: d7b209f
 **Tree**: clean
 **Result**: 29 pass, 0 fail; mutations 3 killed, 0 not
 
