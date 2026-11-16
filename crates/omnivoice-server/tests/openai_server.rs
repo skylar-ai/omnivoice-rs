@@ -680,3 +680,142 @@ async fn sse_stream_contains_delta_done_and_done_marker() {
     assert!(text.contains("\"type\":\"speech.audio.done\""));
     assert!(text.contains("data: [DONE]"));
 }
+
+async fn error_payload(response: axum::response::Response) -> serde_json::Value {
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn json_speech_forwards_silence_controls() {
+    let (app, runtime) = app_with_runtime();
+    let response = app
+        .oneshot(auth_request(
+            "POST",
+            "/v1/audio/speech",
+            Body::from(
+                json!({
+                    "model": MODEL_ID,
+                    "input": "hello",
+                    "voice": "alloy",
+                    "pad_duration": 0.05,
+                    "fade_duration": 0.02,
+                    "prompt_trailing_silence": 0.5
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let recorded = runtime.requests();
+    assert_eq!(recorded.len(), 1);
+    let config = &recorded[0].generation_config;
+    assert_eq!(config.pad_duration, 0.05);
+    assert_eq!(config.fade_duration, 0.02);
+    assert_eq!(config.prompt_trailing_silence, Some(0.5));
+}
+
+#[tokio::test]
+async fn multipart_speech_forwards_silence_controls() {
+    let (app, runtime) = app_with_runtime();
+    let boundary = "omnivoice-boundary";
+    let body = multipart_body(
+        boundary,
+        &[
+            ("model", MODEL_ID),
+            ("input", "clone me"),
+            ("voice", "alloy"),
+            ("ref_text", "reference text"),
+            ("pad_duration", "0.05"),
+            ("fade_duration", "0.02"),
+            ("prompt_trailing_silence", "0.5"),
+        ],
+        Some(("ref_audio", "ref.wav", "audio/wav", &clone_wav_bytes())),
+    );
+    let response = app
+        .oneshot(auth_request_with_content_type(
+            "POST",
+            "/v1/audio/speech",
+            &format!("multipart/form-data; boundary={boundary}"),
+            Body::from(body),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let recorded = runtime.requests();
+    assert_eq!(recorded.len(), 1);
+    let config = &recorded[0].generation_config;
+    assert_eq!(config.pad_duration, 0.05);
+    assert_eq!(config.fade_duration, 0.02);
+    assert_eq!(config.prompt_trailing_silence, Some(0.5));
+}
+
+#[tokio::test]
+async fn multipart_non_numeric_fade_is_422() {
+    let (app, runtime) = app_with_runtime();
+    let boundary = "omnivoice-boundary";
+    let body = multipart_body(
+        boundary,
+        &[
+            ("model", MODEL_ID),
+            ("input", "hello"),
+            ("voice", "alloy"),
+            ("fade_duration", "abc"),
+        ],
+        None,
+    );
+    let response = app
+        .oneshot(auth_request_with_content_type(
+            "POST",
+            "/v1/audio/speech",
+            &format!("multipart/form-data; boundary={boundary}"),
+            Body::from(body),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 422);
+    let payload = error_payload(response).await;
+    assert_eq!(payload["error"]["type"], "invalid_request_error");
+    assert_eq!(
+        payload["error"]["message"],
+        "fade_duration must be a number"
+    );
+    assert!(runtime.requests().is_empty());
+}
+
+#[tokio::test]
+async fn out_of_range_pad_is_422_without_runtime_call() {
+    let (app, runtime) = app_with_runtime();
+    let response = app
+        .oneshot(auth_request(
+            "POST",
+            "/v1/audio/speech",
+            Body::from(
+                json!({
+                    "model": MODEL_ID,
+                    "input": "hello",
+                    "voice": "alloy",
+                    "pad_duration": 3
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 422);
+    let payload = error_payload(response).await;
+    assert_eq!(payload["error"]["type"], "invalid_request_error");
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("pad_duration"),
+        "{payload}"
+    );
+    assert!(runtime.requests().is_empty());
+}

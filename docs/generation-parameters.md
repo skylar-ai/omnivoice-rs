@@ -26,6 +26,9 @@ Current defaults in the Rust port:
 | `postprocess_output` | `true` |
 | `audio_chunk_duration` | `15.0` |
 | `audio_chunk_threshold` | `30.0` |
+| `pad_duration` | `0.1` |
+| `fade_duration` | `0.1` |
+| `prompt_trailing_silence` | none |
 
 ## Decoding
 
@@ -52,12 +55,22 @@ Practical presets:
 | `denoise` | `bool` | Adds the denoise signal for clone-oriented prompt handling. |
 | `preprocess_prompt` | `bool` | Cleans prompt audio and normalizes reference text when preparing clone prompts. |
 | `postprocess_output` | `bool` | Runs output post-processing after stage1 decode. |
+| `pad_duration` | `f32` | Seconds of silence added before and after the generated clip. Range `0`–`2`. |
+| `fade_duration` | `f32` | Seconds of linear fade-in and fade-out on the generated clip, capped at half its length. Range `0`–`1`. |
+| `prompt_trailing_silence` | `Option<f32>` | When set, the clone reference's trailing near-silence (below -50 dBFS) is removed and replaced by exactly this many seconds of digital silence, with or without `preprocess_prompt`. Range `0`–`2`. Up to one hop (40 ms) may be lost to hop alignment. |
 
 Notes:
 
 - `preprocess_prompt` matters most for clone mode
 - `postprocess_output` affects final waveform cleanup
 - `denoise=false` is exposed and tested by server-side request mapping
+- the defaults (`0.1` / `0.1` / none) match upstream OmniVoice; for dubbing, a short fade
+  (`fade_duration=0.02`) keeps final consonants, and `prompt_trailing_silence=0.5` keeps the model
+  from turning reference breath or room noise into a sound before each line
+- with `preprocess_prompt=true` and no `prompt_trailing_silence`, any silence a caller appends to
+  the reference is cut to 0.2 s
+- `pad_duration`, `fade_duration` and `prompt_trailing_silence` out of range are rejected
+  (`InvalidRequest`; HTTP 422; CLI exit 1)
 
 ## Duration and Speed
 

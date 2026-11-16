@@ -126,6 +126,9 @@ Useful controls:
 
 Use this when you want to process multiple samples under one runtime configuration.
 
+Both `infer` and `infer-batch` take `--pad-duration`, `--fade-duration` and
+`--prompt-trailing-silence` (seconds; see [generation-parameters.md](generation-parameters.md)).
+
 ## OpenAI-Compatible Server
 
 `omnivoice-server` exposes:
@@ -202,6 +205,9 @@ Optional request extensions accepted by this server:
 - `denoise`
 - `audio_chunk_duration`
 - `audio_chunk_threshold`
+- `pad_duration` (seconds, default `0.1`, range `0`–`2`)
+- `fade_duration` (seconds, default `0.1`, range `0`–`1`)
+- `prompt_trailing_silence` (seconds, default none, range `0`–`2`)
 - `stream_format`
 
 Multipart notes:

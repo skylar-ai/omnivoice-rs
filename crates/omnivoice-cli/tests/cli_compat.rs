@@ -124,3 +124,59 @@ fn official_infer_aliases_reach_runtime_validation_without_parse_errors() {
         stderr
     );
 }
+
+#[test]
+fn out_of_range_fade_exits_before_model_load() {
+    let binary = env!("CARGO_BIN_EXE_omnivoice-cli");
+    let output = Command::new(binary)
+        .args([
+            "infer",
+            "--model",
+            "/nonexistent/silence-controls-model",
+            "--text",
+            "hello",
+            "--output",
+            "/nonexistent/out.wav",
+            "--fade-duration",
+            "1.5",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "out-of-range fade must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("fade_duration") || stderr.contains("fade-duration"),
+        "stderr does not name the flag:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("silence-controls-model"),
+        "the model was resolved before validation:\n{stderr}"
+    );
+}
+
+#[test]
+fn help_lists_silence_controls() {
+    let binary = env!("CARGO_BIN_EXE_omnivoice-cli");
+    for subcommand in ["infer", "infer-batch"] {
+        let output = Command::new(binary)
+            .args([subcommand, "--help"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{subcommand} --help failed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for expected in [
+            "--pad_duration <seconds, default 0.1>",
+            "--fade_duration <seconds, default 0.1>",
+            "--prompt_trailing_silence <seconds, default none>",
+            "--pad-duration",
+            "--fade-duration",
+            "--prompt-trailing-silence",
+        ] {
+            assert!(
+                stdout.contains(expected),
+                "{subcommand} --help misses `{expected}`:\n{stdout}"
+            );
+        }
+    }
+}
