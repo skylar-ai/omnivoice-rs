@@ -149,6 +149,43 @@ fn embedding_batch_contract_types_exist() {
 }
 
 #[test]
+fn mixed_length_batch_mask_leaves_no_query_row_fully_masked() {
+    // Regression for issue #2: the shorter item's padded cond rows had no
+    // allowed key, softmaxed to NaN and poisoned that item's logits.
+    let short = PreparedPrompt::zeros((1, 8, 6), (1, 6), 2, 6);
+    let long = PreparedPrompt::zeros((1, 8, 10), (1, 10), 3, 10);
+    let cond_lens = [6usize, 10];
+    let target_lens = [4usize, 7];
+    let batched = pack_cfg_batch(&[short, long], &target_lens).unwrap();
+    let (rows, heads, q_len, k_len) = batched.batch_attention_mask_dims();
+    assert_eq!((rows, heads, q_len, k_len), (4, 1, 10, 10));
+    let allowed = |b: usize, q: usize, k: usize| {
+        batched.batch_attention_mask.data[(b * q_len + q) * k_len + k]
+    };
+
+    for b in 0..rows {
+        for q in 0..q_len {
+            assert!(
+                (0..k_len).any(|k| allowed(b, q, k)),
+                "row {b} query {q} attends to nothing"
+            );
+        }
+    }
+    // Valid positions keep their exact attention pattern; padded positions
+    // attend only to themselves.
+    for (index, &cond_len) in cond_lens.iter().enumerate() {
+        for (b, valid_len) in [(index, cond_len), (2 + index, target_lens[index])] {
+            for q in 0..q_len {
+                for k in 0..k_len {
+                    let expected = if q < valid_len { k < valid_len } else { k == q };
+                    assert_eq!(allowed(b, q, k), expected, "row {b} q {q} k {k}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn iterative_loop_never_reintroduces_audio_mask_id() {
     let logits = case_logits();
     let pred = predict_tokens_with_scoring(&logits, &logits, 0.0, 0.0, 1024, 8, 1025).unwrap();
