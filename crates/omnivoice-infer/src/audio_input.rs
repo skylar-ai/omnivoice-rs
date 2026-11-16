@@ -62,6 +62,19 @@ impl ReferenceAudioProcessor {
         ref_text: Option<&str>,
         preprocess_prompt: bool,
     ) -> Result<PreparedReferenceAudio> {
+        self.prepare_prompt_audio_with(input, ref_text, preprocess_prompt, None)
+    }
+
+    /// Like [`Self::prepare_prompt_audio`]; when `trailing_silence` is `Some(seconds)`, the
+    /// trailing near-silence (below -50 dBFS) is stripped after the usual cleanup and replaced by
+    /// exactly that many seconds of digital silence, before hop alignment.
+    pub fn prepare_prompt_audio_with(
+        &self,
+        input: &ReferenceAudioInput,
+        ref_text: Option<&str>,
+        preprocess_prompt: bool,
+        trailing_silence: Option<f32>,
+    ) -> Result<PreparedReferenceAudio> {
         let waveform = self.load_input(input)?;
         let mut mono = mono_samples(&waveform.samples, waveform.channels)?;
         if waveform.sample_rate != self.target_sample_rate {
@@ -93,6 +106,10 @@ impl ReferenceAudioProcessor {
                     "reference audio is empty after silence removal".to_string(),
                 ));
             }
+        }
+
+        if let Some(seconds) = trailing_silence {
+            mono = replace_trailing_silence(&mono, self.target_sample_rate, seconds)?;
         }
 
         mono = trim_to_hop_multiple(&mono, self.hop_length);
@@ -375,6 +392,26 @@ pub fn mono_samples(samples: &[f32], channels: usize) -> Result<Vec<f32>> {
         *sample /= channels as f32;
     }
     Ok(mono)
+}
+
+/// Amplitude of -50 dBFS, the silence threshold `remove_silence` uses.
+const TRAILING_SILENCE_THRESHOLD: f32 = 0.003_162_277_7;
+
+/// Strips samples at or below -50 dBFS from the end, then appends `seconds` of exact zeros.
+fn replace_trailing_silence(samples: &[f32], sample_rate: u32, seconds: f32) -> Result<Vec<f32>> {
+    let last_loud = samples
+        .iter()
+        .rposition(|sample| sample.abs() > TRAILING_SILENCE_THRESHOLD)
+        .ok_or_else(|| {
+            OmniVoiceError::InvalidRequest(
+                "reference audio is empty after silence removal".to_string(),
+            )
+        })?;
+    let zeros = (seconds * sample_rate as f32).round() as usize;
+    let mut out = Vec::with_capacity(last_loud + 1 + zeros);
+    out.extend_from_slice(&samples[..=last_loud]);
+    out.resize(last_loud + 1 + zeros, 0.0);
+    Ok(out)
 }
 
 pub fn trim_to_hop_multiple(samples: &[f32], hop_length: usize) -> Vec<f32> {

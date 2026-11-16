@@ -1132,6 +1132,7 @@ impl ReferenceCaseHandle {
             postprocess_output: case.generation.postprocess_output,
             audio_chunk_duration: case.generation.audio_chunk_duration,
             audio_chunk_threshold: case.generation.audio_chunk_threshold,
+            ..GenerationConfig::default()
         };
 
         if case.ref_audio.is_some() {

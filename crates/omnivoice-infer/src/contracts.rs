@@ -504,6 +504,63 @@ pub struct GenerationConfig {
     pub postprocess_output: bool,
     pub audio_chunk_duration: f32,
     pub audio_chunk_threshold: f32,
+    /// Seconds of zero padding added before and after the generated clip.
+    pub pad_duration: f32,
+    /// Seconds of linear fade-in and fade-out applied to the generated clip.
+    pub fade_duration: f32,
+    /// When set, the reference's trailing near-silence is stripped and replaced by
+    /// exactly this many seconds of digital silence before tokenization.
+    pub prompt_trailing_silence: Option<f32>,
+}
+
+/// Upper bound, in seconds, for `pad_duration` and `prompt_trailing_silence`.
+pub const MAX_SILENCE_SECONDS: f32 = 2.0;
+/// Upper bound, in seconds, for `fade_duration`.
+pub const MAX_FADE_SECONDS: f32 = 1.0;
+
+/// Output padding and fade applied to a decoded clip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutputShaping {
+    pub pad_duration: f32,
+    pub fade_duration: f32,
+}
+
+impl Default for OutputShaping {
+    /// The upstream OmniVoice values, used by the parity harness.
+    fn default() -> Self {
+        Self {
+            pad_duration: 0.1,
+            fade_duration: 0.1,
+        }
+    }
+}
+
+impl GenerationConfig {
+    pub fn output_shaping(&self) -> OutputShaping {
+        OutputShaping {
+            pad_duration: self.pad_duration,
+            fade_duration: self.fade_duration,
+        }
+    }
+
+    /// Checks the silence controls: finite, non-negative, within their upper bounds.
+    pub fn validate(&self) -> Result<()> {
+        check_seconds("pad_duration", self.pad_duration, MAX_SILENCE_SECONDS)?;
+        check_seconds("fade_duration", self.fade_duration, MAX_FADE_SECONDS)?;
+        if let Some(value) = self.prompt_trailing_silence {
+            check_seconds("prompt_trailing_silence", value, MAX_SILENCE_SECONDS)?;
+        }
+        Ok(())
+    }
+}
+
+fn check_seconds(name: &str, value: f32, max: f32) -> Result<()> {
+    if !value.is_finite() || !(0.0..=max).contains(&value) {
+        return Err(OmniVoiceError::InvalidRequest(format!(
+            "{name} must be a finite number of seconds in 0..={max}, got {value}"
+        )));
+    }
+    Ok(())
 }
 
 impl Default for GenerationConfig {
@@ -520,6 +577,9 @@ impl Default for GenerationConfig {
             postprocess_output: true,
             audio_chunk_duration: 15.0,
             audio_chunk_threshold: 30.0,
+            pad_duration: OutputShaping::default().pad_duration,
+            fade_duration: OutputShaping::default().fade_duration,
+            prompt_trailing_silence: None,
         }
     }
 }

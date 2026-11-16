@@ -1,7 +1,7 @@
 [package]
 name = "omnivoice-infer"
 # skylar-ai fork on crates.io candle, published to skylar-crates only
-version = "0.1.0-skylar-2"
+version = "0.1.0-skylar-3"
 description = "OmniVoice text-to-speech inference on candle (skylar-ai fork of FerrisMind/omnivoice-rs)"
 repository = "https://github.com/skylar-ai/omnivoice-rs"
 publish = ["skylar-crates"]

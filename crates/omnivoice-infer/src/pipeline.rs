@@ -178,11 +178,35 @@ impl Phase3Pipeline {
         preprocess_prompt: bool,
         asr_model: Option<&str>,
     ) -> Result<VoiceClonePrompt> {
+        self.create_voice_clone_prompt_from_audio_with(
+            ref_audio,
+            ref_text,
+            preprocess_prompt,
+            None,
+            asr_model,
+        )
+    }
+
+    /// Like [`Self::create_voice_clone_prompt_from_audio`], with an exact trailing silence on
+    /// the reference (see `GenerationConfig::prompt_trailing_silence`).
+    pub fn create_voice_clone_prompt_from_audio_with(
+        &self,
+        ref_audio: &ReferenceAudioInput,
+        ref_text: Option<&str>,
+        preprocess_prompt: bool,
+        prompt_trailing_silence: Option<f32>,
+        asr_model: Option<&str>,
+    ) -> Result<VoiceClonePrompt> {
         let processor = ReferenceAudioProcessor::new(
             self.runtime_artifacts.contracts().sample_rate,
             self.runtime_artifacts.contracts().hop_length,
         );
-        let prepared = processor.prepare_prompt_audio(ref_audio, ref_text, preprocess_prompt)?;
+        let prepared = processor.prepare_prompt_audio_with(
+            ref_audio,
+            ref_text,
+            preprocess_prompt,
+            prompt_trailing_silence,
+        )?;
         let resolved_ref_text = match prepared.ref_text {
             Some(ref_text) => ref_text,
             None => {
@@ -540,12 +564,8 @@ impl Phase3Pipeline {
     }
 
     fn materialize_request(&self, request: &GenerationRequest) -> Result<GenerationRequest> {
+        let mut request = normalize_request_inputs(request)?;
         let batch_size = request.texts.len();
-        let mut request = request.clone();
-        request.ref_audios = normalize_option_ref_audio(&request.ref_audios, batch_size)?;
-        request.ref_texts = normalize_option_strings(&request.ref_texts, batch_size, "ref_texts")?;
-        request.voice_clone_prompts =
-            normalize_option_prompts(&request.voice_clone_prompts, batch_size)?;
 
         for index in 0..batch_size {
             if let Some(prompt) = request.voice_clone_prompts[index].as_ref() {
@@ -557,10 +577,11 @@ impl Phase3Pipeline {
                 continue;
             }
             if let Some(ref_audio) = request.ref_audios[index].clone() {
-                let prompt = self.create_voice_clone_prompt_from_audio(
+                let prompt = self.create_voice_clone_prompt_from_audio_with(
                     &ref_audio,
                     request.ref_texts[index].as_deref(),
                     request.generation_config.preprocess_prompt,
+                    request.generation_config.prompt_trailing_silence,
                     request.asr_model.as_deref(),
                 )?;
                 self.validate_ref_rms(prompt.ref_rms, &format!("request item {index}"))?;
@@ -576,12 +597,8 @@ impl Phase3Pipeline {
         &self,
         request: &GenerationRequest,
     ) -> Result<MaterializedDeviceRequest> {
+        let mut request = normalize_request_inputs(request)?;
         let batch_size = request.texts.len();
-        let mut request = request.clone();
-        request.ref_audios = normalize_option_ref_audio(&request.ref_audios, batch_size)?;
-        request.ref_texts = normalize_option_strings(&request.ref_texts, batch_size, "ref_texts")?;
-        request.voice_clone_prompts =
-            normalize_option_prompts(&request.voice_clone_prompts, batch_size)?;
 
         let mut device_voice_clone_prompts = Vec::with_capacity(batch_size);
         for index in 0..batch_size {
@@ -604,6 +621,7 @@ impl Phase3Pipeline {
                     &ref_audio,
                     request.ref_texts[index].as_deref(),
                     request.generation_config.preprocess_prompt,
+                    request.generation_config.prompt_trailing_silence,
                     request.asr_model.as_deref(),
                 )?;
                 self.validate_ref_rms(prompt.ref_rms, &format!("request item {index}"))?;
@@ -624,6 +642,7 @@ impl Phase3Pipeline {
         ref_audio: &ReferenceAudioInput,
         ref_text: Option<&str>,
         preprocess_prompt: bool,
+        prompt_trailing_silence: Option<f32>,
         asr_model: Option<&str>,
     ) -> Result<DeviceVoiceClonePrompt> {
         let processor = ReferenceAudioProcessor::new(
@@ -631,7 +650,12 @@ impl Phase3Pipeline {
             self.runtime_artifacts.contracts().hop_length,
         );
         self.ensure_not_cancelled()?;
-        let prepared = processor.prepare_prompt_audio(ref_audio, ref_text, preprocess_prompt)?;
+        let prepared = processor.prepare_prompt_audio_with(
+            ref_audio,
+            ref_text,
+            preprocess_prompt,
+            prompt_trailing_silence,
+        )?;
         let resolved_ref_text = match prepared.ref_text {
             Some(ref_text) => ref_text,
             None => {
@@ -713,10 +737,11 @@ impl Phase3Pipeline {
                 // live token tensors from earlier sub-batches.
                 let generated = GeneratedTokens::Single(tensor_to_i64_tensor2(&generated)?);
                 let t_stage = std::time::Instant::now();
-                let audio = self.stage1.decode_final(
+                let audio = self.stage1.decode_final_with(
                     &generated,
                     task.ref_rms[slot],
                     task.generation_config.postprocess_output,
+                    task.generation_config.output_shaping(),
                 )?;
                 record_stage("stage1_decode", &t_stage);
                 self.ensure_not_cancelled()?;
@@ -738,10 +763,11 @@ impl Phase3Pipeline {
                         .collect::<Result<Vec<_>>>()?,
                 );
                 let t_stage = std::time::Instant::now();
-                let audio = self.stage1.decode_final(
+                let audio = self.stage1.decode_final_with(
                     &generated,
                     task.ref_rms[slot],
                     task.generation_config.postprocess_output,
+                    task.generation_config.output_shaping(),
                 )?;
                 record_stage("stage1_decode", &t_stage);
                 self.ensure_not_cancelled()?;
@@ -1504,6 +1530,19 @@ fn normalize_option_prompts(
     }
 }
 
+/// Validates the generation config and normalizes the per-item inputs to the batch size.
+/// Runs before any prompt preparation or model work.
+fn normalize_request_inputs(request: &GenerationRequest) -> Result<GenerationRequest> {
+    request.generation_config.validate()?;
+    let batch_size = request.texts.len();
+    let mut request = request.clone();
+    request.ref_audios = normalize_option_ref_audio(&request.ref_audios, batch_size)?;
+    request.ref_texts = normalize_option_strings(&request.ref_texts, batch_size, "ref_texts")?;
+    request.voice_clone_prompts =
+        normalize_option_prompts(&request.voice_clone_prompts, batch_size)?;
+    Ok(request)
+}
+
 #[cfg(test)]
 mod tests {
     use candle_core::{DType, Device};
@@ -1511,11 +1550,54 @@ mod tests {
     use super::*;
     use crate::{
         artifacts::ReferenceArtifactBundle,
-        contracts::{I64Tensor2, VoiceClonePrompt},
+        contracts::{GenerationConfig, I64Tensor2, VoiceClonePrompt},
         runtime::{DTypeSpec, DeviceSpec},
         stage0_loop::pack_cfg_batch,
         stage0_model::{Stage0DeterministicConfig, Stage0RuntimePlan},
     };
+
+    #[test]
+    fn invalid_silence_controls_rejected_before_model_work() {
+        // The reference path does not exist: if prompt preparation ran first, the error would be
+        // about the file, not the config.
+        let missing = ReferenceAudioInput::FilePath("/nonexistent/silence-controls-ref.wav".into());
+        for (field, config) in [
+            (
+                "pad_duration",
+                GenerationConfig {
+                    pad_duration: 3.0,
+                    ..GenerationConfig::default()
+                },
+            ),
+            (
+                "fade_duration",
+                GenerationConfig {
+                    fade_duration: 1.5,
+                    ..GenerationConfig::default()
+                },
+            ),
+            (
+                "prompt_trailing_silence",
+                GenerationConfig {
+                    prompt_trailing_silence: Some(2.5),
+                    ..GenerationConfig::default()
+                },
+            ),
+        ] {
+            let mut request =
+                GenerationRequest::new_text_only("hello").with_ref_audio(missing.clone());
+            request.generation_config = config;
+            match normalize_request_inputs(&request) {
+                Err(OmniVoiceError::InvalidRequest(message)) => {
+                    assert!(message.contains(field), "`{message}` does not name {field}")
+                }
+                other => panic!("expected InvalidRequest naming {field}, got {other:?}"),
+            }
+        }
+        let mut valid = GenerationRequest::new_text_only("hello").with_ref_audio(missing);
+        valid.generation_config.prompt_trailing_silence = Some(0.5);
+        assert!(normalize_request_inputs(&valid).is_ok());
+    }
 
     fn repo_root() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
