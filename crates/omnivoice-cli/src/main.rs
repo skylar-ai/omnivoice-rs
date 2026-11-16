@@ -13,7 +13,10 @@ use candle_core::Device;
 use omnivoice_infer::{
     artifacts::{ReferenceArtifactBundle, RuntimeArtifacts},
     audio_input::ReferenceAudioProcessor,
-    contracts::{GeneratedTokens, GenerationRequest, PreparedPromptSequence, ReferenceAudioInput},
+    contracts::{
+        GeneratedTokens, GenerationConfig, GenerationRequest, PreparedPromptSequence,
+        ReferenceAudioInput,
+    },
     frontend::Frontend,
     model_source::{resolve_tts_model_root_from_path, DEFAULT_OMNIVOICE_REPO},
     pipeline::Phase3Pipeline,
@@ -159,6 +162,7 @@ fn execute_command(command: CliCommand) -> Result<(), OmniVoiceError> {
             denoise,
             audio_chunk_duration,
             audio_chunk_threshold,
+            silence,
             seed,
             warmup,
             repeat,
@@ -187,6 +191,7 @@ fn execute_command(command: CliCommand) -> Result<(), OmniVoiceError> {
             denoise,
             audio_chunk_duration,
             audio_chunk_threshold,
+            silence,
             seed,
             warmup,
             repeat,
@@ -213,6 +218,7 @@ fn execute_command(command: CliCommand) -> Result<(), OmniVoiceError> {
             position_temperature,
             class_temperature,
             denoise,
+            silence,
             lang_id,
             seed,
         } => run_infer_batch(
@@ -236,6 +242,7 @@ fn execute_command(command: CliCommand) -> Result<(), OmniVoiceError> {
             position_temperature,
             class_temperature,
             denoise,
+            silence,
             lang_id,
             seed,
         ),
@@ -310,6 +317,7 @@ enum CliCommand {
         denoise: bool,
         audio_chunk_duration: f32,
         audio_chunk_threshold: f32,
+        silence: SilenceArgs,
         seed: Option<u64>,
         warmup: usize,
         repeat: usize,
@@ -336,6 +344,7 @@ enum CliCommand {
         position_temperature: f32,
         class_temperature: f32,
         denoise: bool,
+        silence: SilenceArgs,
         lang_id: Option<String>,
         seed: Option<u64>,
     },
@@ -489,6 +498,7 @@ fn parse_infer(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
     let mut bench_json = None;
     let mut index = 1;
 
+    let mut silence = SilenceArgs::default();
     while index < args.len() {
         match args[index].as_str() {
             "--model-dir" | "--model" => {
@@ -604,6 +614,19 @@ fn parse_infer(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
                 bench_json = Some(PathBuf::from(required_value(args, index, "--bench-json")?));
                 index += 2;
             }
+            "--pad-duration" | "--pad_duration" => {
+                silence.pad_duration = parse_f32_arg(args, index, "--pad-duration")?;
+                index += 2;
+            }
+            "--fade-duration" | "--fade_duration" => {
+                silence.fade_duration = parse_f32_arg(args, index, "--fade-duration")?;
+                index += 2;
+            }
+            "--prompt-trailing-silence" | "--prompt_trailing_silence" => {
+                silence.prompt_trailing_silence =
+                    Some(parse_f32_arg(args, index, "--prompt-trailing-silence")?);
+                index += 2;
+            }
             other => {
                 return Err(OmniVoiceError::InvalidRequest(format!(
                     "unknown argument: {other}\n{}",
@@ -613,6 +636,7 @@ fn parse_infer(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
         }
     }
 
+    silence.validate()?;
     Ok(CliCommand::Infer {
         model_dir: model_arg_or_default(model_dir),
         text: required_string_arg(text, "--text")?,
@@ -637,6 +661,7 @@ fn parse_infer(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
         denoise,
         audio_chunk_duration,
         audio_chunk_threshold,
+        silence,
         seed,
         warmup,
         repeat,
@@ -669,6 +694,7 @@ fn parse_infer_batch(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
     let mut seed = None;
     let mut index = 1;
 
+    let mut silence = SilenceArgs::default();
     while index < args.len() {
         match args[index].as_str() {
             "--model-dir" | "--model" => {
@@ -759,6 +785,19 @@ fn parse_infer_batch(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
                 seed = Some(parse_u64_arg(args, index, "--seed")?);
                 index += 2;
             }
+            "--pad-duration" | "--pad_duration" => {
+                silence.pad_duration = parse_f32_arg(args, index, "--pad-duration")?;
+                index += 2;
+            }
+            "--fade-duration" | "--fade_duration" => {
+                silence.fade_duration = parse_f32_arg(args, index, "--fade-duration")?;
+                index += 2;
+            }
+            "--prompt-trailing-silence" | "--prompt_trailing_silence" => {
+                silence.prompt_trailing_silence =
+                    Some(parse_f32_arg(args, index, "--prompt-trailing-silence")?);
+                index += 2;
+            }
             other => {
                 return Err(OmniVoiceError::InvalidRequest(format!(
                     "unknown argument: {other}\n{}",
@@ -768,6 +807,7 @@ fn parse_infer_batch(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
         }
     }
 
+    silence.validate()?;
     Ok(CliCommand::InferBatch {
         model_dir: model_arg_or_default(model_dir),
         test_list: required_path_arg(test_list, "--test-list")?,
@@ -789,6 +829,7 @@ fn parse_infer_batch(args: &[String]) -> Result<CliCommand, OmniVoiceError> {
         position_temperature,
         class_temperature,
         denoise,
+        silence,
         lang_id,
         seed,
     })
@@ -1256,6 +1297,7 @@ fn run_infer(
     denoise: bool,
     audio_chunk_duration: f32,
     audio_chunk_threshold: f32,
+    silence: SilenceArgs,
     seed: Option<u64>,
     warmup: usize,
     repeat: usize,
@@ -1291,6 +1333,7 @@ fn run_infer(
     request.generation_config.denoise = denoise;
     request.generation_config.audio_chunk_duration = audio_chunk_duration;
     request.generation_config.audio_chunk_threshold = audio_chunk_threshold;
+    silence.apply(&mut request.generation_config);
 
     let has_ref_audio = request.ref_audios.iter().any(|reference| reference.is_some());
 
@@ -1509,6 +1552,7 @@ fn run_infer_batch(
     position_temperature: f32,
     class_temperature: f32,
     denoise: bool,
+    silence: SilenceArgs,
     lang_id: Option<String>,
     seed: Option<u64>,
 ) -> Result<(), OmniVoiceError> {
@@ -1580,6 +1624,7 @@ fn run_infer_batch(
                 position_temperature,
                 class_temperature,
                 denoise,
+                silence,
                 seed,
             )
         }));
@@ -1645,6 +1690,7 @@ fn run_batch_worker(
     position_temperature: f32,
     class_temperature: f32,
     denoise: bool,
+    silence: SilenceArgs,
     seed: Option<u64>,
 ) -> Result<BatchWorkerStats, OmniVoiceError> {
     let mut options = RuntimeOptions::new((*model_dir).clone())
@@ -1680,6 +1726,7 @@ fn run_batch_worker(
             position_temperature,
             class_temperature,
             denoise,
+            silence,
         );
         let audios = pipeline.generate(&request)?;
         if audios.len() != job.samples.len() {
@@ -1714,6 +1761,7 @@ fn build_batch_request(
     position_temperature: f32,
     class_temperature: f32,
     denoise: bool,
+    silence: SilenceArgs,
 ) -> GenerationRequest {
     let mut request = GenerationRequest::new_text_only(samples[0].text.clone());
     request.texts = samples.iter().map(|sample| sample.text.clone()).collect();
@@ -1752,6 +1800,7 @@ fn build_batch_request(
     request.generation_config.position_temperature = position_temperature;
     request.generation_config.class_temperature = class_temperature;
     request.generation_config.denoise = denoise;
+    silence.apply(&mut request.generation_config);
     request
 }
 
@@ -2428,6 +2477,40 @@ fn device_usage_values() -> &'static str {
     "auto|cuda|cuda:N|mps|metal|cpu"
 }
 
+/// Output padding/fade and reference trailing silence, shared by `infer` and `infer-batch`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SilenceArgs {
+    pad_duration: f32,
+    fade_duration: f32,
+    prompt_trailing_silence: Option<f32>,
+}
+
+impl Default for SilenceArgs {
+    fn default() -> Self {
+        let defaults = GenerationConfig::default();
+        Self {
+            pad_duration: defaults.pad_duration,
+            fade_duration: defaults.fade_duration,
+            prompt_trailing_silence: defaults.prompt_trailing_silence,
+        }
+    }
+}
+
+impl SilenceArgs {
+    fn apply(&self, config: &mut GenerationConfig) {
+        config.pad_duration = self.pad_duration;
+        config.fade_duration = self.fade_duration;
+        config.prompt_trailing_silence = self.prompt_trailing_silence;
+    }
+
+    /// Rejects out-of-range values at parse time, before any model is resolved or loaded.
+    fn validate(&self) -> Result<(), OmniVoiceError> {
+        let mut config = GenerationConfig::default();
+        self.apply(&mut config);
+        config.validate()
+    }
+}
+
 fn artifacts_validate_usage(program: &str) -> String {
     format!("usage:\n  {program} validate [--model <path-or-hf-repo>] [--reference-root <path>]")
 }
@@ -2442,12 +2525,15 @@ fn infer_usage(program: &str) -> String {
             "[--guidance_scale <value>] [--t_shift <value>] [--layer_penalty_factor <value>] ",
             "[--position_temperature <value>] [--class_temperature <value>] ",
             "[--preprocess_prompt <bool>] [--postprocess_output <bool>] [--denoise <bool>] ",
-            "[--audio_chunk_duration <seconds>] [--audio_chunk_threshold <seconds>] [--seed <u64>]\n\n",
+            "[--audio_chunk_duration <seconds>] [--audio_chunk_threshold <seconds>] [--seed <u64>]\n",
+            "  [--pad_duration <seconds, default 0.1>] [--fade_duration <seconds, default 0.1>] ",
+            "[--prompt_trailing_silence <seconds, default none>]\n\n",
             "bench flags:\n  [--warmup <n>] [--repeat <n>] [--bench-json <path>]\n\n",
             "aliases:\n  --ref-audio, --ref-text, --num-step, --guidance-scale, --t-shift,\n",
             "  --layer-penalty-factor, --position-temperature, --class-temperature,\n",
             "  --preprocess-prompt, --postprocess-output, --audio-chunk-duration,\n",
-            "  --audio-chunk-threshold"
+            "  --audio-chunk-threshold, --pad-duration, --fade-duration,\n",
+            "  --prompt-trailing-silence"
         ),
         program = program,
         device = device_usage_values(),
@@ -2464,12 +2550,15 @@ fn infer_batch_usage(program: &str) -> String {
             "[--batch_duration <seconds>] [--batch_size <n>] [--warmup <n>] ",
             "[--preprocess_prompt <bool>] [--postprocess_output <bool>] ",
             "[--layer_penalty_factor <value>] [--position_temperature <value>] ",
-            "[--class_temperature <value>] [--denoise <bool>] [--lang_id <lang>] [--seed <u64>]\n\n",
+            "[--class_temperature <value>] [--denoise <bool>] [--lang_id <lang>] [--seed <u64>]\n",
+            "  [--pad_duration <seconds, default 0.1>] [--fade_duration <seconds, default 0.1>] ",
+            "[--prompt_trailing_silence <seconds, default none>]\n\n",
             "aliases:\n  --test-list, --res-dir, --num-step, --guidance-scale, --t-shift,\n",
             "  --nj-per-gpu, --audio-chunk-duration, --audio-chunk-threshold,\n",
             "  --batch-duration, --batch-size, --preprocess-prompt,\n",
             "  --postprocess-output, --layer-penalty-factor,\n",
-            "  --position-temperature, --class-temperature, --lang-id"
+            "  --position-temperature, --class-temperature, --lang-id,\n",
+            "  --pad-duration, --fade-duration, --prompt-trailing-silence"
         ),
         program = program,
         device = device_usage_values(),
@@ -2530,12 +2619,128 @@ fn usage() -> String {
 mod tests {
     use super::{
         parse_entrypoint_command, parse_optional_test_f32, requested_help, validate_batch_id,
-        CliCommand, InvocationMode,
+        CliCommand, GenerationConfig, InvocationMode, SilenceArgs,
     };
     use omnivoice_infer::{
         artifacts::RuntimeArtifactManifest, model_source::manifest_download_targets, DeviceSpec,
     };
     use std::path::PathBuf;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    fn expected_silence() -> SilenceArgs {
+        SilenceArgs {
+            pad_duration: 0.05,
+            fade_duration: 0.02,
+            prompt_trailing_silence: Some(0.5),
+        }
+    }
+
+    #[test]
+    fn infer_parses_silence_controls() {
+        for flags in [
+            [
+                "--pad-duration",
+                "--fade-duration",
+                "--prompt-trailing-silence",
+            ],
+            [
+                "--pad_duration",
+                "--fade_duration",
+                "--prompt_trailing_silence",
+            ],
+        ] {
+            let command = CliCommand::parse(&args(&[
+                "infer", "--text", "hello", "--output", "out.wav", flags[0], "0.05", flags[1],
+                "0.02", flags[2], "0.5",
+            ]))
+            .unwrap();
+            match command {
+                CliCommand::Infer { silence, .. } => {
+                    assert_eq!(silence, expected_silence(), "{flags:?}");
+                    let mut config = GenerationConfig::default();
+                    silence.apply(&mut config);
+                    assert_eq!(config.pad_duration, 0.05);
+                    assert_eq!(config.fade_duration, 0.02);
+                    assert_eq!(config.prompt_trailing_silence, Some(0.5));
+                }
+                other => panic!("expected Infer, got {other:?}"),
+            }
+        }
+        match CliCommand::parse(&args(&["infer", "--text", "hello", "--output", "out.wav"]))
+            .unwrap()
+        {
+            CliCommand::Infer { silence, .. } => assert_eq!(silence, SilenceArgs::default()),
+            other => panic!("expected Infer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_batch_parses_silence_controls() {
+        for flags in [
+            [
+                "--pad-duration",
+                "--fade-duration",
+                "--prompt-trailing-silence",
+            ],
+            [
+                "--pad_duration",
+                "--fade_duration",
+                "--prompt_trailing_silence",
+            ],
+        ] {
+            let command = CliCommand::parse(&args(&[
+                "infer-batch",
+                "--test-list",
+                "list.jsonl",
+                "--res-dir",
+                "out",
+                flags[0],
+                "0.05",
+                flags[1],
+                "0.02",
+                flags[2],
+                "0.5",
+            ]))
+            .unwrap();
+            match command {
+                CliCommand::InferBatch { silence, .. } => {
+                    assert_eq!(silence, expected_silence(), "{flags:?}")
+                }
+                other => panic!("expected InferBatch, got {other:?}"),
+            }
+        }
+        let samples = vec![super::BatchSample {
+            id: "a".to_string(),
+            text: "hello".to_string(),
+            ref_audio: None,
+            ref_text: None,
+            instruct: None,
+            language: None,
+            duration: None,
+            speed: None,
+        }];
+        let request = super::build_batch_request(
+            &samples,
+            32,
+            2.0,
+            0.1,
+            15.0,
+            30.0,
+            true,
+            true,
+            5.0,
+            5.0,
+            0.0,
+            true,
+            expected_silence(),
+        );
+        assert_eq!(request.generation_config.pad_duration, 0.05);
+        assert_eq!(request.generation_config.fade_duration, 0.02);
+        assert_eq!(request.generation_config.prompt_trailing_silence, Some(0.5));
+    }
 
     #[test]
     fn infer_defaults_to_official_repo_when_model_is_omitted() {

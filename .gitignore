@@ -56,3 +56,6 @@ Desktop.ini
 !artifacts/listening_demo/**/*.wav
 !artifacts/listening_demo_rust/**/*.wav
 artifacts/listening_demo_rust/diag/**
+
+# Local spec-driven planning notes
+.specs/

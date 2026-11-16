@@ -323,6 +323,15 @@ fn set_generation_config_overrides(
     if let Some(value) = parse_optional_f32(values, "audio_chunk_threshold")? {
         config.audio_chunk_threshold = value;
     }
+    if let Some(value) = parse_optional_f32(values, "pad_duration")? {
+        config.pad_duration = value;
+    }
+    if let Some(value) = parse_optional_f32(values, "fade_duration")? {
+        config.fade_duration = value;
+    }
+    if let Some(value) = parse_optional_f32(values, "prompt_trailing_silence")? {
+        config.prompt_trailing_silence = Some(value);
+    }
     Ok(())
 }
 
@@ -366,6 +375,7 @@ fn validate_generation_config(config: &GenerationConfig) -> Result<(), ServerErr
             "audio_chunk_threshold must be finite and greater than zero",
         ));
     }
+    config.validate().map_err(ServerError::from_infer)?;
     Ok(())
 }
 
@@ -630,7 +640,10 @@ fn parse_multipart_extra_value(name: &str, raw: &str) -> Result<Value, ServerErr
         | "position_temperature"
         | "class_temperature"
         | "audio_chunk_duration"
-        | "audio_chunk_threshold" => Ok(Value::from(parse_multipart_f64(name, raw)?)),
+        | "audio_chunk_threshold"
+        | "pad_duration"
+        | "fade_duration"
+        | "prompt_trailing_silence" => Ok(Value::from(parse_multipart_f64(name, raw)?)),
         "seed" | "num_step" => Ok(Value::from(parse_multipart_u64(name, raw)?)),
         "preprocess_prompt" | "postprocess_output" | "denoise" => {
             Ok(Value::from(parse_multipart_bool(name, raw)?))

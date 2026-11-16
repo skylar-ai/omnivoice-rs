@@ -16,12 +16,9 @@ use crate::{
         RuntimeContracts,
     },
     codec_layers::CodecWeightSource,
-    contracts::{DecodedAudio, F32Tensor3, GeneratedTokens, I64Tensor2},
+    contracts::{DecodedAudio, F32Tensor3, GeneratedTokens, I64Tensor2, OutputShaping},
     error::{OmniVoiceError, Result},
-    postprocess::{
-        apply_clone_rms_restore, cross_fade_chunks, ensure_non_empty_audio, fade_and_pad_audio,
-        peak_normalize_auto_voice, remove_silence,
-    },
+    postprocess::{cross_fade_chunks, finalize_output_audio},
     runtime::RuntimeOptions,
     stage1_model::{Stage1DecodeTrace, Stage1Model, Stage1ModelConfig},
 };
@@ -372,27 +369,38 @@ impl Stage1RuntimePlan {
         Ok(audio)
     }
 
+    /// Decodes with the upstream parity padding and fade (`OutputShaping::default()`).
     pub fn decode_final(
         &self,
         tokens: &GeneratedTokens,
         ref_rms: Option<f32>,
         postprocess_output: bool,
     ) -> Result<DecodedAudio> {
+        self.decode_final_with(
+            tokens,
+            ref_rms,
+            postprocess_output,
+            OutputShaping::default(),
+        )
+    }
+
+    /// Decodes with the caller's padding and fade.
+    pub fn decode_final_with(
+        &self,
+        tokens: &GeneratedTokens,
+        ref_rms: Option<f32>,
+        postprocess_output: bool,
+        shaping: OutputShaping,
+    ) -> Result<DecodedAudio> {
         validate_ref_rms(ref_rms)?;
         let mut audio = self.decode_raw(tokens, ref_rms)?;
-        if postprocess_output {
-            let trimmed = remove_silence(&audio.samples, audio.sample_rate, 500, 100, 100);
-            if !trimmed.is_empty() {
-                audio.samples = trimmed;
-            }
-        }
-        ensure_non_empty_audio(&audio.samples)?;
-        audio.samples = if let Some(rms) = ref_rms {
-            apply_clone_rms_restore(&audio.samples, rms)
-        } else {
-            peak_normalize_auto_voice(&audio.samples)?
-        };
-        audio.samples = fade_and_pad_audio(&audio.samples, audio.sample_rate, 0.1, 0.1);
+        audio.samples = finalize_output_audio(
+            std::mem::take(&mut audio.samples),
+            audio.sample_rate,
+            ref_rms,
+            postprocess_output,
+            shaping,
+        )?;
         audio.validate()?;
         Ok(audio)
     }
@@ -433,21 +441,13 @@ impl Stage1RuntimePlan {
             audio_to_tensor3(&raw_audio.samples)?,
         );
         let mut final_audio = raw_audio.clone();
-        if postprocess_output {
-            let trimmed =
-                remove_silence(&final_audio.samples, final_audio.sample_rate, 500, 100, 100);
-            if !trimmed.is_empty() {
-                final_audio.samples = trimmed;
-            }
-        }
-        ensure_non_empty_audio(&final_audio.samples)?;
-        final_audio.samples = if let Some(rms) = ref_rms {
-            apply_clone_rms_restore(&final_audio.samples, rms)
-        } else {
-            peak_normalize_auto_voice(&final_audio.samples)?
-        };
-        final_audio.samples =
-            fade_and_pad_audio(&final_audio.samples, final_audio.sample_rate, 0.1, 0.1);
+        final_audio.samples = finalize_output_audio(
+            std::mem::take(&mut final_audio.samples),
+            final_audio.sample_rate,
+            ref_rms,
+            postprocess_output,
+            OutputShaping::default(),
+        )?;
         final_audio.validate()?;
         tensors.insert(
             "final_waveform".to_string(),
@@ -481,19 +481,13 @@ impl Stage1RuntimePlan {
     ) -> Result<DecodedAudio> {
         validate_ref_rms(ref_rms)?;
         let mut audio = self.decode_raw_tensor(tokens)?;
-        if postprocess_output {
-            let trimmed = remove_silence(&audio.samples, audio.sample_rate, 500, 100, 100);
-            if !trimmed.is_empty() {
-                audio.samples = trimmed;
-            }
-        }
-        ensure_non_empty_audio(&audio.samples)?;
-        audio.samples = if let Some(rms) = ref_rms {
-            apply_clone_rms_restore(&audio.samples, rms)
-        } else {
-            peak_normalize_auto_voice(&audio.samples)?
-        };
-        audio.samples = fade_and_pad_audio(&audio.samples, audio.sample_rate, 0.1, 0.1);
+        audio.samples = finalize_output_audio(
+            std::mem::take(&mut audio.samples),
+            audio.sample_rate,
+            ref_rms,
+            postprocess_output,
+            OutputShaping::default(),
+        )?;
         audio.validate()?;
         Ok(audio)
     }
@@ -506,19 +500,13 @@ impl Stage1RuntimePlan {
     ) -> Result<DecodedAudio> {
         validate_ref_rms(ref_rms)?;
         let mut audio = self.decode_raw_tensor_chunks(chunks)?;
-        if postprocess_output {
-            let trimmed = remove_silence(&audio.samples, audio.sample_rate, 500, 100, 100);
-            if !trimmed.is_empty() {
-                audio.samples = trimmed;
-            }
-        }
-        ensure_non_empty_audio(&audio.samples)?;
-        audio.samples = if let Some(rms) = ref_rms {
-            apply_clone_rms_restore(&audio.samples, rms)
-        } else {
-            peak_normalize_auto_voice(&audio.samples)?
-        };
-        audio.samples = fade_and_pad_audio(&audio.samples, audio.sample_rate, 0.1, 0.1);
+        audio.samples = finalize_output_audio(
+            std::mem::take(&mut audio.samples),
+            audio.sample_rate,
+            ref_rms,
+            postprocess_output,
+            OutputShaping::default(),
+        )?;
         audio.validate()?;
         Ok(audio)
     }

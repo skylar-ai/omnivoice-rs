@@ -1,3 +1,4 @@
+use crate::contracts::OutputShaping;
 use crate::error::{OmniVoiceError, Result};
 use std::ops::Range;
 
@@ -36,6 +37,36 @@ pub fn fade_and_pad_audio(
     } else {
         processed
     }
+}
+
+/// Final post-processing of a decoded clip: optional long-silence removal, loudness
+/// restore (clone) or peak normalization (auto voice), then fade and padding.
+pub fn finalize_output_audio(
+    samples: Vec<f32>,
+    sample_rate: u32,
+    ref_rms: Option<f32>,
+    postprocess_output: bool,
+    shaping: OutputShaping,
+) -> Result<Vec<f32>> {
+    let mut samples = samples;
+    if postprocess_output {
+        let trimmed = remove_silence(&samples, sample_rate, 500, 100, 100);
+        if !trimmed.is_empty() {
+            samples = trimmed;
+        }
+    }
+    ensure_non_empty_audio(&samples)?;
+    let samples = if let Some(rms) = ref_rms {
+        apply_clone_rms_restore(&samples, rms)
+    } else {
+        peak_normalize_auto_voice(&samples)?
+    };
+    Ok(fade_and_pad_audio(
+        &samples,
+        sample_rate,
+        shaping.pad_duration,
+        shaping.fade_duration,
+    ))
 }
 
 pub fn apply_clone_rms_restore(audio: &[f32], ref_rms: f32) -> Vec<f32> {

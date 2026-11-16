@@ -734,6 +734,7 @@ fn validate_generation_scalars(
 }
 
 fn validate_generation_config(config: &GenerationConfig) -> Result<()> {
+    config.validate()?;
     if config.num_step == 0 || config.num_step > MAX_GENERATION_STEPS {
         return Err(OmniVoiceError::InvalidRequest(format!(
             "num_step must be in the range 1..={MAX_GENERATION_STEPS}"
