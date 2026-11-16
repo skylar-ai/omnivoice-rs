@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "promote_threshold": 2,
+  "window_days": 45,
+  "quarantine_threshold": 2,
+  "next_id": 3,
+  "lessons": [
+    {
+      "id": "L-001",
+      "key": "surviving_mutant::a grep wiring proof must assert the forwarded argument at each call site not count calls to the function",
+      "text": "A grep wiring proof must assert the forwarded argument at each call site, not count calls to the function.",
+      "signal": "surviving_mutant",
+      "scope": "proofs/static",
+      "status": "candidate",
+      "features": [
+        "silence-controls"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "static.sh live-decode / c14 (proofs/static)"
+      ],
+      "created": "2026-11-16T20:59:09Z",
+      "last_seen": "2026-11-16T20:59:09Z"
+    },
+    {
+      "id": "L-002",
+      "key": "surviving_mutant::a criterion naming several subcommands needs a proof that runs every one of them",
+      "text": "A criterion naming several subcommands needs a proof that runs every one of them.",
+      "signal": "surviving_mutant",
+      "scope": "omnivoice-cli",
+      "status": "candidate",
+      "features": [
+        "silence-controls"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "AC 19 / C23 (omnivoice-cli)"
+      ],
+      "created": "2026-11-16T20:59:10Z",
+      "last_seen": "2026-11-16T20:59:10Z"
+    }
+  ]
+}
