@@ -177,6 +177,12 @@ pub fn pack_cfg_batch(prepared: &[PreparedPrompt], target_lens: &[usize]) -> Res
                 batch_attention_mask.set(index, 0, seq, kv, true);
             }
         }
+        // Padded cond positions must attend to something: a fully masked
+        // query row softmaxes to NaN, and in the next layer `0 * NaN` in
+        // `probs @ V` poisons every valid position of the shorter item.
+        for diag in cond_len..max_c_len {
+            batch_attention_mask.set(index, 0, diag, diag, true);
+        }
 
         let uncond_row = batch_size + index;
         for codebook in 0..num_audio_codebook {
