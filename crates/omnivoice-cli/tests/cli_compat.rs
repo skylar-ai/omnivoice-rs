@@ -128,31 +128,45 @@ fn official_infer_aliases_reach_runtime_validation_without_parse_errors() {
 #[test]
 fn out_of_range_fade_exits_before_model_load() {
     let binary = env!("CARGO_BIN_EXE_omnivoice-cli");
-    let output = Command::new(binary)
-        .args([
-            "infer",
-            "--model",
-            "/nonexistent/silence-controls-model",
-            "--text",
-            "hello",
-            "--output",
-            "/nonexistent/out.wav",
-            "--fade-duration",
-            "1.5",
-        ])
-        .output()
-        .unwrap();
+    let common = [
+        "--model",
+        "/nonexistent/silence-controls-model",
+        "--fade-duration",
+        "1.5",
+    ];
+    let infer = [
+        "infer",
+        "--text",
+        "hello",
+        "--output",
+        "/nonexistent/out.wav",
+    ];
+    let infer_batch = [
+        "infer-batch",
+        "--test-list",
+        "/nonexistent/silence-controls-list.jsonl",
+        "--res-dir",
+        "/nonexistent/out",
+    ];
+    for subcommand_args in [&infer[..], &infer_batch[..]] {
+        let output = Command::new(binary)
+            .args(subcommand_args)
+            .args(common)
+            .output()
+            .unwrap();
 
-    assert!(!output.status.success(), "out-of-range fade must fail");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("fade_duration") || stderr.contains("fade-duration"),
-        "stderr does not name the flag:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("silence-controls-model"),
-        "the model was resolved before validation:\n{stderr}"
-    );
+        let name = subcommand_args[0];
+        assert!(!output.status.success(), "{name}: out-of-range fade must fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("fade_duration") || stderr.contains("fade-duration"),
+            "{name}: stderr does not name the flag:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("silence-controls-model") && !stderr.contains("silence-controls-list"),
+            "{name}: the model or test list was used before validation:\n{stderr}"
+        );
+    }
 }
 
 #[test]

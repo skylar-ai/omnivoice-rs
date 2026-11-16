@@ -16,21 +16,31 @@ case "$1" in
     grep -q "OutputShaping::default()" crates/omnivoice-infer/src/stage1_decoder.rs || { echo "stage1 does not default to parity shaping"; exit 1; }
     ;;
   c14)
-    # both ref_audio prompt builders (host materialize_request, device materialize_device_request)
+    # callers: both ref_audio prompt builders receive the request's value
     c=$(grep -c "request.generation_config.prompt_trailing_silence," $P)
-    [ "$c" -eq 2 ] || { echo "expected 2 prompt builders passing prompt_trailing_silence, found $c"; exit 1; }
-    grep -q "fn normalize_request_inputs" $P && grep -A2 "fn normalize_request_inputs" $P | grep -q "generation_config.validate()" || { echo "validation is not first in normalize_request_inputs"; exit 1; }
+    [ "$c" -eq 2 ] || { echo "expected 2 callers passing prompt_trailing_silence, found $c"; exit 1; }
+    # builders: each forwards its parameter into prepare_prompt_audio_with
+    for f in create_voice_clone_prompt_from_audio_with create_device_voice_clone_prompt_from_audio; do
+      call=$(fn_body $P $f | awk '/prepare_prompt_audio_with\(/{on=1} on{print} on&&/\)\?;/{exit}')
+      [ -n "$call" ] || { echo "$f does not call prepare_prompt_audio_with"; exit 1; }
+      echo "$call" | grep -Eq "^\s*prompt_trailing_silence,\s*$" || { echo "$f does not forward prompt_trailing_silence"; exit 1; }
+    done
+    # the parity wrapper is the only place that passes None
+    fn_body $P create_voice_clone_prompt_from_audio | grep -q "None" || { echo "parity wrapper changed"; exit 1; }
+    grep -A2 "fn normalize_request_inputs" $P | grep -q "generation_config.validate()" || { echo "validation is not first in normalize_request_inputs"; exit 1; }
     ;;
   live-decode)
     # both live decode sites (short and chunked) pass the request's shaping
-    c=$(grep -c "decode_final_with(" $P); [ "$c" -ge 2 ] || { echo "live decodes do not pass output shaping ($c)"; exit 1; }
-    grep -Eq "decode_final\(\s*$" $P && { echo "a live decode still uses the parity decode_final"; exit 1; }
+    c=$(grep -c "decode_final_with(" $P); [ "$c" -eq 2 ] || { echo "expected 2 live decode_final_with calls, found $c"; exit 1; }
+    c=$(grep -c "task.generation_config.output_shaping()," $P); [ "$c" -eq 2 ] || { echo "expected 2 live decodes passing output_shaping(), found $c"; exit 1; }
     ;;
   c21)
-    for d in docs/generation-parameters.md docs/cli-and-server.md; do
-      for k in pad_duration fade_duration prompt_trailing_silence; do
-        grep -q "$k" "$d" || { echo "$d misses $k"; exit 1; }
-      done
+    for k in pad_duration fade_duration prompt_trailing_silence; do
+      case $k in fade_duration) r='`0`–`1`';; *) r='`0`–`2`';; esac
+      case $k in prompt_trailing_silence) d='none';; *) d='`0.1`';; esac
+      grep -F "| \`$k\` | $d |" docs/generation-parameters.md >/dev/null || { echo "generation-parameters.md: no default row for $k"; exit 1; }
+      grep -F "| \`$k\` |" docs/generation-parameters.md | grep -F "Range $r" >/dev/null || { echo "generation-parameters.md: no range for $k"; exit 1; }
+      grep -F "\`$k\` (seconds, default $d, range $r)" docs/cli-and-server.md >/dev/null || { echo "cli-and-server.md: no default/range for $k"; exit 1; }
     done
     ;;
   *) echo "unknown check $1"; exit 2;;

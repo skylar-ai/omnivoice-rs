@@ -85,7 +85,7 @@ Proof: `.specs/features/silence-controls/proof.sh -p omnivoice-server --test ope
 Proof: `.specs/features/silence-controls/proof.sh -p omnivoice-cli --bin omnivoice-cli tests::infer_parses_silence_controls`
 Proof: `.specs/features/silence-controls/proof.sh -p omnivoice-cli --bin omnivoice-cli tests::infer_batch_parses_silence_controls`
 
-**C23** - `infer --fade-duration 1.5` with a nonexistent `--model` exits non-zero and stderr names `fade-duration`/`fade_duration`, not the missing model (AC 19)
+**C23** - `infer` and `infer-batch` with `--fade-duration 1.5` and a nonexistent `--model` exit non-zero and stderr names `fade-duration`/`fade_duration`, not the missing model or test list (AC 19)
 Proof: `.specs/features/silence-controls/proof.sh -p omnivoice-cli --test cli_compat out_of_range_fade_exits_before_model_load`
 
 **C24** - `infer --help` and `infer-batch --help` list `--pad-duration`, `--fade-duration` and `--prompt-trailing-silence` with defaults `0.1`, `0.1` and `none`; the docs list all three parameters (AC 20, AC 21)
@@ -108,7 +108,7 @@ Proof: `.specs/features/silence-controls/static.sh c21`
 | silent reference, AC 12 (2) | set → error C15 · None → accepted C15 | - |
 | `POST /v1/audio/speech` statuses this changes (2) | 200 C19 C20 · 422 C20 C21 | - |
 | request encodings (2) | JSON C19 · multipart C20 | - |
-| CLI subcommands (2) | `infer` C22 C23 C24 · `infer-batch` C22 C24 | - |
+| CLI subcommands (2) | `infer` C22 C23 C24 · `infer-batch` C22 C23 C24 | - |
 | CLI exit codes (2) | 0 C22 · non-zero C23 | - |
 | validation entry points (3 assemblies) | pipeline C9 · server C21 · CLI C23 | - |
 | Landing doors (2) | door 1 pub fields + version bump C1 · door 2 wire names C19 C20 | - |
@@ -132,7 +132,7 @@ Proof: `.specs/features/silence-controls/static.sh c21`
 ## Handoff
 
 - **Settled mid-build:** none
-- **Dispatched:** none
+- **Dispatched:** Verifier at `516f49c` (no screens: no capture binds) - returned
 - **Boundary:** C1-C17 closed at e537fd4 (infer); C18-C24 closed in the cli/server commit
 - **Abandoned:** none
 - **Corrected:** C3's wording before its test went green: the fade is numpy-style linspace with endpoints (upstream behaviour), so the 480th ramp sample is at full level; the original wording claimed all 480 were below it. AC 3's example in plan.md was corrected the same way.
