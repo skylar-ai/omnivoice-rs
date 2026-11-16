@@ -1370,7 +1370,6 @@ fn pack_cfg_batch_device(
         cond_attention_masks.push(build_attention_mask_tensor(
             prompt.total_length,
             max_c_len,
-            None,
             device,
         )?);
 
@@ -1395,7 +1394,6 @@ fn pack_cfg_batch_device(
         uncond_attention_masks.push(build_attention_mask_tensor(
             target_len,
             max_c_len,
-            Some(target_len),
             device,
         )?);
     }
@@ -1459,7 +1457,6 @@ fn pad_mask_tensor(mask: &Tensor, max_c_len: usize, device: &Device) -> Result<T
 fn build_attention_mask_tensor(
     active_len: usize,
     max_c_len: usize,
-    diagonal_from: Option<usize>,
     device: &Device,
 ) -> Result<Tensor> {
     let mut values = vec![0u8; max_c_len * max_c_len];
@@ -1469,10 +1466,11 @@ fn build_attention_mask_tensor(
             values[row_offset + column] = 1;
         }
     }
-    if let Some(start) = diagonal_from {
-        for index in start..max_c_len {
-            values[index * max_c_len + index] = 1;
-        }
+    // Padded positions must attend to something: a fully masked query row
+    // softmaxes to NaN, and in the next layer `0 * NaN` in `probs @ V`
+    // poisons every valid position of the row. Must match `pack_cfg_batch`.
+    for index in active_len..max_c_len {
+        values[index * max_c_len + index] = 1;
     }
     Ok(Tensor::from_vec(
         values,
@@ -2011,5 +2009,90 @@ mod tests {
 
         assert_eq!(actual[0], expected_auto[0]);
         assert_eq!(actual[1], expected_long[0]);
+    }
+
+    #[test]
+    fn device_pack_matches_host_pack_for_mixed_length_batch() {
+        // Regression: `generate_with_usage` packs via `pack_cfg_batch_device`,
+        // whose cond rows left padded query positions fully masked. Those rows
+        // softmax to NaN, poison the shorter item, leave mask ids in its
+        // tokens and crash stage 1 with CUDA_ERROR_ASSERT. Needs no model.
+        let device = Device::Cpu;
+        let make = |len: usize, target_start: usize, seed: i64| {
+            let mut prompt = PreparedPrompt::zeros((1, 8, len), (1, len), target_start, len);
+            for codebook in 0..8 {
+                for seq in 0..len {
+                    let value = (seed + (codebook * len + seq) as i64) % 1024;
+                    prompt.prompt.input_ids.set(0, codebook, seq, value);
+                }
+            }
+            for seq in target_start..len {
+                prompt.prompt.audio_mask.set(0, seq, true);
+            }
+            prompt
+        };
+        let host_prompts = [make(6, 2, 3), make(10, 3, 11)];
+        let target_lens = [4usize, 7];
+
+        let host = pack_cfg_batch(&host_prompts, &target_lens).unwrap();
+        let device_prompts = host_prompts
+            .iter()
+            .map(|prompt| PreparedPromptDevice {
+                input_ids: prompt.prompt.input_ids.to_candle(&device).unwrap(),
+                audio_mask: prompt.prompt.audio_mask.to_candle(&device).unwrap(),
+                total_length: prompt.total_length,
+                audio_mask_id: prompt.audio_mask_id,
+            })
+            .collect::<Vec<_>>();
+        let packed =
+            pack_cfg_batch_device(&device_prompts, &target_lens, 8, &device, DType::F32).unwrap();
+
+        let to_u8 = |tensor: &Tensor| {
+            tensor
+                .to_dtype(DType::U8)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<u8>()
+                .unwrap()
+        };
+        let host_attention = host
+            .batch_attention_mask
+            .to_candle(&device)
+            .unwrap();
+        let attention = to_u8(&packed.attention_mask);
+        assert_eq!(attention, to_u8(&host_attention), "attention masks diverge");
+        assert_eq!(
+            to_u8(&packed.audio_mask),
+            to_u8(&host.batch_audio_mask.to_candle(&device).unwrap()),
+            "audio masks diverge"
+        );
+        assert_eq!(
+            packed
+                .input_ids
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<i64>()
+                .unwrap(),
+            host.batch_input_ids
+                .to_candle(&device)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<i64>()
+                .unwrap(),
+            "input ids diverge"
+        );
+
+        let (rows, _, q_len, k_len) = packed.attention_mask.dims4().unwrap();
+        for row in 0..rows {
+            for q in 0..q_len {
+                let start = (row * q_len + q) * k_len;
+                assert!(
+                    attention[start..start + k_len].iter().any(|&v| v != 0),
+                    "row {row} query {q} attends to nothing"
+                );
+            }
+        }
     }
 }
