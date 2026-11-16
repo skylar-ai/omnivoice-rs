@@ -1,8 +1,8 @@
 # silence-controls proofs
 
-**HEAD**: 516f49c
+**HEAD**: f4826c1
 **Tree**: clean
-**Result**: 29 pass, 0 fail; mutations 0 killed, 3 not
+**Result**: 29 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -40,6 +40,6 @@
 
 | Mutation | Location | Killed |
 | --- | --- | --- |
-| short live decode ignores request pad/fade (parity default) | `crates/omnivoice-infer/src/pipeline.rs:738` | no |
-| device prompt builder drops prompt_trailing_silence | `crates/omnivoice-infer/src/pipeline.rs:652` | no |
-| infer-batch skips parse-time range check | `crates/omnivoice-cli/src/main.rs:810` | no |
+| short live decode ignores request pad/fade (parity default) | `crates/omnivoice-infer/src/pipeline.rs:738` | yes |
+| device prompt builder drops prompt_trailing_silence | `crates/omnivoice-infer/src/pipeline.rs:652` | yes |
+| infer-batch skips parse-time range check | `crates/omnivoice-cli/src/main.rs:810` | yes |
