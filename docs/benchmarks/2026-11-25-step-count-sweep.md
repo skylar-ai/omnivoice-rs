@@ -21,6 +21,13 @@ uses.
   and more than you save by going from 12 to 8 steps.
 - `guidance_scale` (2.5 or 3.0) and `t_shift` (0.1 or 0.3) don't change
   latency. Times stay within 1%, so choose them on quality alone.
+- In a listening test, the production setting (12 steps, guidance 3.0,
+  `t_shift` 0.1) sounded best. Every config with fewer steps had a quality
+  issue, and `t_shift` 0.3 produced the worst file of the run.
+
+We recommend that you keep the production setting and cache the encoded
+reference to reduce latency. That saves more time than cutting steps, and it
+doesn't change the audio.
 
 ## What the blog changed
 
@@ -145,6 +152,44 @@ From the 32-step and 12-step runs, one unmasking step costs:
 `stage0_generate` is almost entirely per-step work. The fixed cost of a
 cloned request is `stage_materialize` plus `stage1_decode`.
 
+## Listening results
+
+One listener compared ten voice cloning outputs and ranked them from best to
+worst. Each file comes from the production matrix unless the table says
+otherwise.
+
+| Rank | Steps / guidance / `t_shift` | Text | Notes |
+| --- | --- | --- | --- |
+| 1 | 12 / 3.0 / 0.1 (production) | long | No issues noticed. Good quality. |
+| 2 | 32 / 3.0 / 0.1 | long | Better voice similarity than rank 1, but a short glitch at the start and some pauses. |
+| 3 | 12 / 3.0 / 0.1 (production) | short | No issues. Good quality and voice similarity. |
+| 4 | 10 / 2.5 / 0.1 | long | Similar to rank 5, with the same long pauses, but no repeated words. |
+| 5 | 10 / 3.0 / 0.1 | long | Pauses like rank 2. Repeats the word "modern" at 0:07. |
+| 6 | 8 / 3.0 / 0.1 | long | Unnatural accent and intonation. Glitches before some words. |
+| 7 | 8 / 2.5 / 0.1, blog matrix | long | Understandable, and the voice is cloned, but it sounds robotic. |
+| 8 | 8 / 3.0 / 0.1 | short | All words correct, but poor voice similarity. |
+| 9 | 10 / 2.5 / 0.3 | short | All words correct, but worse voice similarity. Shortest output of the run (1.64 s). |
+| 10 | 8 / 3.0 / 0.3 | long | Wrong words, glitches, and unintelligible passages. Unusable. |
+
+The blog-matrix file used guidance 2.5 without the production accent
+instruction or silence settings.
+
+The ranking leads to these conclusions:
+
+- **Keep 12 steps.** It produced the only files with no issues on both long
+  and short text. More steps didn't help: 32 steps added a glitch and pauses.
+- **Fewer steps hurts quality.** At 10 steps, guidance 3.0 repeated a word.
+  At 8 steps, long text gained accent and glitches, and short text lost the
+  speaker's voice. The speedups (1.11x and 1.25x) don't justify these issues.
+- **Short lines lose voice similarity first.** Ranks 8 and 9 kept every word
+  but no longer sounded like the speaker. Dubbing is mostly short clauses, so
+  test short lines when you evaluate any setting change.
+- **Guidance 2.5 did better than 3.0 at 10 steps.** Rank 4 avoided the word
+  repeat in rank 5. This comes from one seed, so confirm it on more seeds
+  before you rely on it.
+- **Reject `t_shift` 0.3.** It produced the worst file of the run and the
+  shortest output with the weakest voice similarity.
+
 ## Analysis
 
 ### Reference encoding is the largest fixed cost
@@ -186,10 +231,9 @@ graphs.
 
 ## Limits of this benchmark
 
-- **No quality measurement.** Whisper wasn't available on the benchmark
-  machine, so the run has no WER or speaker similarity scores. The blog found
-  that 8 steps failed its WER threshold. Don't change the production step
-  count until you check quality.
+- **No automated quality scores.** Whisper wasn't available on the benchmark
+  machine, so the run has no WER or speaker similarity scores. The listening
+  results come from one listener and ten files.
 - **One reference clip and three texts.** The results come from one speaker,
   one seed, and English output only.
 - **Reference longer than production.** The 10.15 s reference is above the
@@ -201,11 +245,13 @@ graphs.
 
 ## Next steps
 
-1. Check how the TTS server in `skylar-inference` passes the reference to
+1. Keep production at 12 steps, guidance 3.0, and `t_shift` 0.1.
+2. Check how the TTS server in `skylar-inference` passes the reference to
    `omnivoice-infer`, and add a per-speaker cache of encoded references.
-2. Measure `stage_materialize` with a 5.5 s reference.
-3. Run a WER and speaker similarity check on 12, 10, and 8 steps before you
-   change `OMNIVOICE_NUM_STEP` in production.
+3. Measure `stage_materialize` with a 5.5 s reference.
+4. Optional: If you reconsider fewer steps, test 10 steps with guidance 2.5
+   on several seeds and speakers, and include WER and speaker similarity
+   scores.
 
 ## Reproduce this run
 
