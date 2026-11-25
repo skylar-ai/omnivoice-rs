@@ -14,20 +14,28 @@ uses.
   steps, and 8 steps is 3.1x faster.
 - Voice cloning shrinks the gain to 1.65x (16 steps) and 2.46x (8 steps),
   because two costs don't depend on step count.
-- Against the production setting (12 steps, guidance 3.0), 10 steps is 1.11x
-  faster and 8 steps is about 1.25x faster.
+- The deployed dubbing service, `skylar-inference-dubs`, runs 32 steps
+  (`OMNIVOICE_NUM_STEP=32`), not the `skylar-inference` code default of 12.
+  With production request settings, 12 steps is 1.9x faster than 32.
+- Against 12 steps with guidance 3.0, 10 steps is 1.11x faster and 8 steps is
+  about 1.25x faster.
 - Every cloned request spends about 500 ms preparing and encoding the
-  reference clip. That's about 40% of a short request at production settings,
-  and more than you save by going from 12 to 8 steps.
+  reference clip. That's about 40% of a short request at 12 steps, and more
+  than you save by going from 12 to 8 steps.
 - `guidance_scale` (2.5 or 3.0) and `t_shift` (0.1 or 0.3) don't change
   latency. Times stay within 1%, so choose them on quality alone.
-- In a listening test, the production setting (12 steps, guidance 3.0,
-  `t_shift` 0.1) sounded best. Every config with fewer steps had a quality
-  issue, and `t_shift` 0.3 produced the worst file of the run.
+- In a listening test, 12 steps with guidance 3.0 and `t_shift` 0.1 sounded
+  best. It beat 32 steps, which added a glitch and pauses. Every config with
+  fewer than 12 steps had a quality issue, and `t_shift` 0.3 produced the
+  worst file of the run.
 
-We recommend that you keep the production setting and cache the encoded
-reference to reduce latency. That saves more time than cutting steps, and it
-doesn't change the audio.
+We recommend two changes:
+
+1. Set `skylar-inference-dubs` to 12 steps. This is the largest speedup
+   available, about 1.9x, and the listening test preferred its output.
+2. Cache the encoded reference to remove about 500 ms from each request. This
+   saves more time than going below 12 steps, and it doesn't change the
+   audio.
 
 ## What the blog changed
 
@@ -86,6 +94,32 @@ the CLI's `--bench-json` output. Model loading isn't included. The tables
 compare wall time rather than real-time factor (RTF), because audio length
 changes slightly between configs and seeds, which makes RTF noisy.
 
+## Production settings
+
+On November 25, 2026, the dubbing service `skylar-inference-dubs` (Cloud Run,
+`us-central1`, revision `skylar-inference-dubs-00007-4qd`) ran image
+`v1.7.0-sm120`. That image uses `skylar-tts-rs` 1.2.0-sm120, which uses the
+same `omnivoice-infer` version as this benchmark.
+
+| Parameter | Deployed value | Source |
+| --- | --- | --- |
+| `num_step` | 32 | Service env `OMNIVOICE_NUM_STEP=32`. The code default is 12, and the `skylar-tts-rs` default is 16. |
+| `guidance_scale` | 3.0 for English, 2.0 for other languages | `profile_for()` in `skylar-inference` |
+| `instruct` | "american accent" for English only | `profile_for()` in `skylar-inference` |
+| `t_shift` | 0.1 | `omnivoice-infer` default |
+| `position_temperature` / `class_temperature` | 5.0 / 0.0 | `omnivoice-infer` default |
+| `layer_penalty_factor` | 5.0 | `omnivoice-infer` default |
+| `pad_duration` / `fade_duration` | 0.1 s / 0.02 s | `skylar-inference` constants |
+| `prompt_trailing_silence` | 0.5 s | `skylar-inference` constant |
+| Number spelling (`OMNIVOICE_PREPROCESS_TEXT`) | On | `skylar-inference` default |
+| Queue depth / texts per call | 8 / 4 | Service env `OMNIVOICE_MAX_QUEUE_DEPTH=8` / `skylar-tts-rs` default |
+| dtype | f16 | `skylar-tts-rs` |
+| Hardware | 1 NVIDIA RTX PRO 6000, 20 vCPU, 80 GiB, 0 to 3 instances | Cloud Run |
+
+Every revision since the service was created on November 19, 2026 sets
+`OMNIVOICE_NUM_STEP=32`. The reference clip length is set by the caller,
+`ll-tts`, which caps it at 5.5 s by default.
+
 ## Results
 
 ### Blog matrix, default voice
@@ -115,13 +149,15 @@ The 16-step result (1.84x) matches the blog's eager 16-step result (1.92x).
 
 This matrix copies the production dubbing request: voice cloning, English with
 `instruct` set to "american accent", `pad_duration` 0.1 s, `fade_duration`
-0.02 s, and `prompt_trailing_silence` 0.5 s. The speedup is relative to the
-production default of 12 steps with guidance 3.0.
+0.02 s, and `prompt_trailing_silence` 0.5 s. The deployed service runs 32
+steps (see [Production settings](#production-settings)). The speedup is
+relative to 12 steps with guidance 3.0, the `skylar-inference` code
+default.
 
 | Steps / guidance | short | medium | long | Speedup |
 | --- | --- | --- | --- | --- |
-| 32 / 3.0 | 2.27 s | 3.47 s | 4.97 s | 0.52x |
-| **12 / 3.0 (production)** | **1.23 s** | **1.76 s** | **2.55 s** | **1.00x** |
+| 32 / 3.0 (deployed) | 2.27 s | 3.47 s | 4.97 s | 0.52x |
+| **12 / 3.0 (code default)** | **1.23 s** | **1.76 s** | **2.55 s** | **1.00x** |
 | 12 / 2.5 | 1.21 s | 1.77 s | 2.55 s | 1.00x |
 | 10 / 3.0 | 1.11 s | 1.60 s | 2.29 s | 1.11x |
 | 10 / 2.5 | 1.11 s | 1.58 s | 2.29 s | 1.11x |
@@ -134,7 +170,7 @@ times. The raw data for every run is in
 
 ### Where the time goes
 
-The pipeline records time spent in each stage. At production settings:
+The pipeline records time spent in each stage. At 12 steps with guidance 3.0:
 
 | Stage | short | medium | long |
 | --- | --- | --- | --- |
@@ -160,9 +196,9 @@ otherwise.
 
 | Rank | Steps / guidance / `t_shift` | Text | Notes |
 | --- | --- | --- | --- |
-| 1 | 12 / 3.0 / 0.1 (production) | long | No issues noticed. Good quality. |
-| 2 | 32 / 3.0 / 0.1 | long | Better voice similarity than rank 1, but a short glitch at the start and some pauses. |
-| 3 | 12 / 3.0 / 0.1 (production) | short | No issues. Good quality and voice similarity. |
+| 1 | 12 / 3.0 / 0.1 (code default) | long | No issues noticed. Good quality. |
+| 2 | 32 / 3.0 / 0.1 (deployed) | long | Better voice similarity than rank 1, but a short glitch at the start and some pauses. |
+| 3 | 12 / 3.0 / 0.1 (code default) | short | No issues. Good quality and voice similarity. |
 | 4 | 10 / 2.5 / 0.1 | long | Similar to rank 5, with the same long pauses, but no repeated words. |
 | 5 | 10 / 3.0 / 0.1 | long | Pauses like rank 2. Repeats the word "modern" at 0:07. |
 | 6 | 8 / 3.0 / 0.1 | long | Unnatural accent and intonation. Glitches before some words. |
@@ -176,8 +212,9 @@ instruction or silence settings.
 
 The ranking leads to these conclusions:
 
-- **Keep 12 steps.** It produced the only files with no issues on both long
-  and short text. More steps didn't help: 32 steps added a glitch and pauses.
+- **Use 12 steps.** It produced the only files with no issues on both long
+  and short text. More steps didn't help: 32 steps, which production runs
+  today, added a glitch and pauses.
 - **Fewer steps hurts quality.** At 10 steps, guidance 3.0 repeated a word.
   At 8 steps, long text gained accent and glitches, and short text lost the
   speaker's voice. The speedups (1.11x and 1.25x) don't justify these issues.
@@ -240,15 +277,19 @@ graphs.
   production cap of 5.5 s.
 - **No target duration.** Production sends a target `duration` for each clip.
   This benchmark doesn't set one.
-- **Different GPU.** The blog used an RTX A6000. This run used an L4, so
-  compare speedup ratios, not absolute times.
+- **Different GPU.** The blog used an RTX A6000, and production uses an RTX
+  PRO 6000. This run used an L4, so compare speedup ratios, not absolute
+  times.
 
 ## Next steps
 
-1. Keep production at 12 steps, guidance 3.0, and `t_shift` 0.1.
-2. Check how the TTS server in `skylar-inference` passes the reference to
-   `omnivoice-infer`, and add a per-speaker cache of encoded references.
-3. Measure `stage_materialize` with a 5.5 s reference.
+1. Set `OMNIVOICE_NUM_STEP` to 12 on `skylar-inference-dubs`, or remove it to
+   use the code default. Keep guidance 3.0 and `t_shift` 0.1. Find out first
+   why the service was set to 32.
+2. Add a per-speaker cache of encoded references. `skylar-tts-rs` encodes the
+   reference once per call in `generate()` (`src/omnivoice.rs`), and shares
+   it across the texts in that call, but keeps nothing between calls.
+3. Measure `stage_materialize` with a 5.5 s reference on the production GPU.
 4. Optional: If you reconsider fewer steps, test 10 steps with guidance 2.5
    on several seeds and speakers, and include WER and speaker similarity
    scores.
