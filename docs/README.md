@@ -16,6 +16,8 @@ Unlike the upstream Python repository, this workspace is focused on inference, v
   How language IDs are used in this port and where to find the full language map.
 - [Evaluation and Verification](./evaluation.md)
   What is actually verified in this repository, where artifacts live, and how to reproduce checks.
+- [Step count and guidance sweep (November 25, 2026)](./benchmarks/2026-11-25-step-count-sweep.md)
+  CUDA latency for `num_step`, `guidance_scale`, and `t_shift`, with per-stage timings and production settings.
 - [Behavior Contracts](./contracts/README.md)
   Phase-by-phase contracts for frontend, reference prompt handling, stage0, and stage1/postprocess behavior.
 
