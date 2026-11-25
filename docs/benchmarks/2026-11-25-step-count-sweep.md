@@ -29,12 +29,19 @@ uses.
   fewer than 12 steps had a quality issue, and `t_shift` 0.3 produced the
   worst file of the run.
 
-We recommend two changes:
+- Production logs show that a 32-step call takes about 0.85 s on the
+  production GPU with an image built for it, but reached a 25 s median under
+  load. The queue depth of 8 let groups wait behind up to 8 others instead of
+  being refused. See [Production log metrics](#production-log-metrics).
+
+We recommend these changes:
 
 1. Set `skylar-inference-dubs` to 12 steps. This is the largest speedup
    available, about 1.9x, and the listening test preferred its output.
-2. Cache the encoded reference to remove about 500 ms from each request. This
-   saves more time than going below 12 steps, and it doesn't change the
+2. Lower `OMNIVOICE_MAX_QUEUE_DEPTH` to fit a latency budget, so a clip that
+   would arrive too late is refused instead of delayed.
+3. Cache the encoded reference. On the L4 this removes about 500 ms from each
+   request, more than going below 12 steps saves, and it doesn't change the
    audio.
 
 ## What the blog changed
@@ -96,10 +103,15 @@ changes slightly between configs and seeds, which makes RTF noisy.
 
 ## Production settings
 
-On November 25, 2026, the dubbing service `skylar-inference-dubs` (Cloud Run,
-`us-central1`, revision `skylar-inference-dubs-00007-4qd`) ran image
-`v1.7.0-sm120`. That image uses `skylar-tts-rs` 1.2.0-sm120, which uses the
-same `omnivoice-infer` version as this benchmark.
+The dubbing service is `skylar-inference-dubs` (Cloud Run, `us-central1`).
+Its last revision to serve traffic, `skylar-inference-dubs-00007-4qd`, ran an
+untagged image built on November 24, 2026 at 19:59 UTC, after the
+`v1.7.0-sm120` release commit. The service template now points at the image
+tagged `v1.7.0-sm120`. That release uses `skylar-tts-rs` 1.2.0-sm120, which
+uses the same `omnivoice-infer` version as this benchmark.
+
+Since November 24, 2026 at 22:54 UTC, the service is set to manual scaling
+with 0 instances, so it serves no traffic.
 
 | Parameter | Deployed value | Source |
 | --- | --- | --- |
@@ -119,6 +131,66 @@ same `omnivoice-infer` version as this benchmark.
 Every revision since the service was created on November 19, 2026 sets
 `OMNIVOICE_NUM_STEP=32`. The reference clip length is set by the caller,
 `ll-tts`, which caps it at 5.5 s by default.
+
+## Production log metrics
+
+The `skylar-inference-dubs` app logs cover November 19 to 24, 2026: 9,005 TTS
+calls from 53 sessions, all at 32 steps with a queue depth of 8. Each call's
+`elapsed_ms` covers the whole server side: queue wait, reference encoding,
+and generation. Almost every call (99.9%) carried 2 texts, with a median of
+4.2 s of audio per call.
+
+| Revision | Dates (UTC) | Instances | Calls/min | Median | p95 | Refused |
+| --- | --- | --- | --- | --- | --- | --- |
+| 00001 | Nov 19, 14:16 to 14:31 | 1 | 21 | 3.05 s | 6.25 s | 0 |
+| 00004 | Nov 19, 16:56 to 18:40 | 3 | 20 | 25.2 s | 27.9 s | 35 |
+| 00005 | Nov 19, evening | 1 | 55 | 4.66 s | 7.37 s | 18 |
+| 00005 | Nov 24 | 1 | about 20 | 0.89 s | 1.03 s | 0 |
+| 00006 | Nov 24, 19:17 to 19:40 | 1 | 20 | 2.70 s | 3.27 s | 0 |
+| 00007 | Nov 24, 20:12 to 22:46 | 1 | 22 | 0.85 s | 0.98 s | 0 |
+
+Calls/min is the mean over minutes with traffic. All 53 refusals happened on
+November 19 between 17:22 and 18:40 UTC. Revision 00005's 18 refusals came at
+18:40, while 00004 was still draining.
+
+### A call takes about 0.85 s on the production GPU
+
+Under light load, revision 00007 served a call in 0.85 s (median), with a p95
+of 0.98 s. That's an RTF of about 0.2, including reference encoding. Based on
+the step costs measured on the L4, 12 steps would bring this to about 0.45 to
+0.5 s. This estimate hasn't been measured on the production GPU.
+
+### The image changes speed by about 3x
+
+At the same load, revision 00006 took 2.70 s per call and revision 00007 took
+0.85 s. The p95 of 00006 is close to its median, so the extra time is slower
+generation, not queueing. The 00006 image was built at 18:02 UTC, right after
+the `v1.7.0` release commit. The 00007 image was built at 19:59 UTC, after the
+`v1.7.0-sm120` commit at 19:43. The likely cause is that 00006 ran a build not
+compiled for the RTX PRO 6000 (sm120). This hasn't been verified. Revisions
+00001 and 00004 show similar slow times.
+
+### A deep queue delays clips instead of refusing them
+
+With 3 instances at about 20 calls/min, revision 00004 reached a 25 s median.
+That matches a full queue: 8 groups waiting at about 3 s each. When the queue
+was full, the server refused 35 groups, and `ll-tts` dropped them without
+retrying. A dubbed clip that arrives 25 s late is likely no longer useful.
+With an sm120 image, a full queue of 8 waits about 7 s at 32 steps, or about
+4 s at 12 steps.
+
+Revision 00004 saturated with 3 instances at a load that one instance of
+00007 handled easily. gRPC streams stay on the instance that opened them,
+session affinity is off, and `containerConcurrency` is 1000, so streams can
+pile onto one instance while others stay idle. Per-instance data is needed to
+confirm this.
+
+### References run slightly over the limit
+
+The server warned about 1,401 references outside the recommended 3 to 5.5 s:
+1,346 too long and 55 too short. The long ones have a median of 5.6 s. That's
+probably the `ll-tts` cap of 5.5 s plus its 0.15 s lead padding. The warning
+doesn't change the output.
 
 ## Results
 
@@ -280,17 +352,27 @@ graphs.
 - **Different GPU.** The blog used an RTX A6000, and production uses an RTX
   PRO 6000. This run used an L4, so compare speedup ratios, not absolute
   times.
+- **Logs only.** The production metrics come from app logs. They don't
+  include Cloud Monitoring data such as GPU utilization or instance count over
+  time.
 
 ## Next steps
 
 1. Set `OMNIVOICE_NUM_STEP` to 12 on `skylar-inference-dubs`, or remove it to
    use the code default. Keep guidance 3.0 and `t_shift` 0.1. Find out first
    why the service was set to 32.
-2. Add a per-speaker cache of encoded references. `skylar-tts-rs` encodes the
+2. Set `OMNIVOICE_MAX_QUEUE_DEPTH` from a latency budget: divide the longest
+   useful wait by the time per call. At about 0.85 s per call, a depth of 8
+   means waits up to about 7 s.
+3. Deploy only images built for the production GPU (the `-sm120` builds), and
+   confirm that revisions 00001, 00004, and 00006 ran other builds.
+4. Check how streams spread across instances. Pull per-instance logs or Cloud
+   Monitoring metrics for revision 00004.
+5. Add a per-speaker cache of encoded references. `skylar-tts-rs` encodes the
    reference once per call in `generate()` (`src/omnivoice.rs`), and shares
    it across the texts in that call, but keeps nothing between calls.
-3. Measure `stage_materialize` with a 5.5 s reference on the production GPU.
-4. Optional: If you reconsider fewer steps, test 10 steps with guidance 2.5
+6. Measure `stage_materialize` with a 5.5 s reference on the production GPU.
+7. Optional: If you reconsider fewer steps, test 10 steps with guidance 2.5
    on several seeds and speakers, and include WER and speaker similarity
    scores.
 
